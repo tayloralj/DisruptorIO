@@ -30,13 +30,13 @@ import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
 
-public class NIOWaitDisruptorScheduledExcutorTest {
+public class NIOWaitDisruptorScheduledExecutorTest {
 	static {
 		System.setProperty("org.apache.logging.log4j.simplelog.StatusLogger.level", "TRACE");
 		System.setProperty("org.apache.logging.log4j.level", "DEBUG");
 
 	}
-	private final Logger logger = LoggerFactory.getLogger(NIOWaitDisruptorScheduledExcutorTest.class);
+	private final Logger logger = LoggerFactory.getLogger(NIOWaitDisruptorScheduledExecutorTest.class);
 	private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
 	NIOWaitStrategy.NIOClock clock;
 	NIOWaitStrategy nioWaitStrategy;

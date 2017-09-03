@@ -80,8 +80,7 @@ public class NIOWaitSelectorServerWithEventAndTimer {
 
 		try (final NIOWaitStrategy nioWaitStrategy = new NIOWaitStrategy(clock);
 				final ServerSocketChannel socketChannel = ServerSocketChannel.open();
-				final ServerSocket serverSocket = new ServerSocket(0);
-				final Socket s = new Socket();) {
+			final Socket s = new Socket();) {
 			final ThreadFactory threadFactory = new ThreadFactory() {
 
 				@Override

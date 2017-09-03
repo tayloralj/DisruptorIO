@@ -11,7 +11,7 @@ import com.lmax.disruptor.collections.Histogram;
 
 /**
  * simple timer callback class which attempts to record how long it takes to get
- * called after schedulding itself
+ * called after scheduling itself
  */
 public class LatencyTimer {
 	private final Logger logger = LoggerFactory.getLogger(LatencyTimer.class);
@@ -56,20 +56,16 @@ public class LatencyTimer {
 				return;
 			}
 
-			handler.fireIn(interval);
 			count++;
 			final long actualNanoTime = System.nanoTime();
-			/*
-			 * if ((count & 16383) == 0) {
-			 * logger.info("LatencyTimer count:{} timerDiff:{} actualDiff:{}", count,
-			 * (currentNanoTime - firedAt), actualNanoTime - lastFiredAtActual); }
-			 */
+			
 			histo.addObservation(actualNanoTime - lastFiredAtActual);
 			if (count < 11000) {
 				histo.clear();
 			}
 
 			lastFiredAtActual = actualNanoTime;
+			handler.fireIn(interval);
 
 		}
 

@@ -41,13 +41,14 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	/** temp until better struct */
 	final PriorityQueue<MyTimerHandler> timerHeap;
 	long currentTimeNanos = 0;
+	long lastCheckNIO = 0;
 	final long SLOW_TIMER_WARN;
 	final TimerLatencyReport timerLatencyReport;
 	final NIOWaitStrategyExecutor strategyExecutor;
 
 	static final Field SELECTED_KEYS_FIELD;
 	static final Field PUBLIC_SELECTED_KEYS_FIELD;
-
+	// use funky code from aeron to install object free code
 	static {
 		Field selectKeysField = null;
 		Field publicSelectKeysField = null;
@@ -117,7 +118,10 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			}
 			checkTimer();
 		}
-
+		setNanoTime();
+		if (currentTimeNanos - lastCheckNIO > 5000000L) {
+			checkNIO();
+		}
 		return availableSequence;
 
 	}
@@ -135,7 +139,7 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 	boolean checkNIO() {
 		try {
-
+			logger.trace("CheckNIO");
 			final int keyCount = selector.selectNow();
 			if (keyCount == 0) {
 				return false;
@@ -181,6 +185,7 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 			}
 			selectedKeySet.reset();
+			lastCheckNIO = currentTimeNanos;
 			return true;
 		} catch (final IOException ex) {
 			LangUtil.rethrowUnchecked(ex);
@@ -353,7 +358,10 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	}
 
 	/**
-	 * for interacting with and setting the timer
+	 * for interacting with and setting the timer. can be reused to schedule the
+	 * timer callback many times, but each timer can only be set once. if the time
+	 * is set when already registered this will adjust the existing timercallback
+	 * rather than create a new one
 	 * 
 	 * @author ajt
 	 *
@@ -410,19 +418,31 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			selector.close();
 		} catch (final IOException ex) {
 			LangUtil.rethrowUnchecked(ex);
-
 		}
 
 	}
 
+	/**
+	 * very simple clock interface which returns the time since 1970/01/1 in
+	 * nanoseconds rather than milliseconds can be used to allow time based testing
+	 * 
+	 * @author ajt
+	 *
+	 */
 	public interface NIOClock {
 		public long getTimeNanos();
 
 	}
 
+	/**
+	 * simple clock to be a little more precise than milliseconds Calibrates itself
+	 * by looking at the nanosecond time when the millisecond rolls over and using
+	 * this to convert the
+	 */
+
 	static NIOClock getDefaultClock() {
 		return new NIOClock() {
-			long nanoOffset = 0;
+			private long nanoOffset = 0;
 			{
 				final long endMillis = System.currentTimeMillis() + 2;
 				long currentMillis = System.currentTimeMillis();

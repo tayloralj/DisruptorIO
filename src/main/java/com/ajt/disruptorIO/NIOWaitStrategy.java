@@ -41,10 +41,11 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	/** temp until better struct */
 	final PriorityQueue<MyTimerHandler> timerHeap;
 	long currentTimeNanos = 0;
-	long lastCheckNIO = 0;
 	final long SLOW_TIMER_WARN;
 	final TimerLatencyReport timerLatencyReport;
 	final NIOWaitStrategyExecutor strategyExecutor;
+
+	boolean isClosed = false;
 
 	static final Field SELECTED_KEYS_FIELD;
 	static final Field PUBLIC_SELECTED_KEYS_FIELD;
@@ -118,10 +119,6 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			}
 			checkTimer();
 		}
-		setNanoTime();
-		if (currentTimeNanos - lastCheckNIO > 5000000L) {
-			checkNIO();
-		}
 		return availableSequence;
 
 	}
@@ -185,7 +182,6 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 			}
 			selectedKeySet.reset();
-			lastCheckNIO = currentTimeNanos;
 			return true;
 		} catch (final IOException ex) {
 			LangUtil.rethrowUnchecked(ex);
@@ -411,14 +407,19 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	@Override
 	public void close() throws Exception {
 		logger.info("Closing selector");
+		if (isClosed) {
+			logger.info("Already closed");
+			return;
+		}
 		timerLatencyReport.callback.timerCallback(0, 0);
 		strategyExecutor.close();
 		selector.wakeup();
 		try {
 			selector.close();
 		} catch (final IOException ex) {
-			LangUtil.rethrowUnchecked(ex);
+			logger.info("Error closing selector", ex);
 		}
+		isClosed = true;
 
 	}
 

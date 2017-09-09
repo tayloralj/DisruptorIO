@@ -198,8 +198,10 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	 *
 	 */
 	public interface SelectorCallback {
+		/** readable */
 		public void opRead(final SelectableChannel channel, final long currentTimeNanos);
 
+		/** acceptable */
 		public void opAccept(final SelectableChannel channel, final long currentTimeNanos);
 
 		public void opConnect(final SelectableChannel channel, final long currentTimeNanos);
@@ -252,9 +254,9 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		final long[] histogramBin = new long[] { 50, 100, 200, 400, 600, 800, 1000, 2000, 3000, 4000, 6000, 12000,
 				16000, 32000, 64000, 128000, 256000, 512000, 1024000, 2048000, 4096000, 32768000 };
 
-		private final TimerCallback timerCallback;
-		private boolean isRegistered = false;
-		private long nanoTimeWillFireAfter;
+		final TimerCallback timerCallback;
+		boolean isRegistered = false;
+		long nanoTimeWillFireAfter;
 		final String timerName;
 		final Histogram timerHistogram;
 		final Histogram lateBy;

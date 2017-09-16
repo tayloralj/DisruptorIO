@@ -1,9 +1,7 @@
 package com.ajt.disruptorIO;
 
-import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
-import java.time.Clock;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -11,13 +9,12 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.hamcrest.Matchers;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.ajt.disruptorIO.LatencyTimer;
-import com.ajt.disruptorIO.NIOWaitStrategy;
 import com.lmax.disruptor.EventFactory;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.ExceptionHandler;
@@ -123,7 +120,7 @@ public class NIOWaitDisruptorTest {
 				break;
 			}
 		}
-		assertThat(handlers[0].counter.get(), is(toSend));
+		assertThat(handlers[0].counter.get(), Matchers.is(toSend));
 	disruptor.shutdown();
 
 	}
@@ -137,7 +134,7 @@ public class NIOWaitDisruptorTest {
 		Sequence cursor = new Sequence(0);
 		long sequence = nioWaitStrategy.waitFor(0, cursor, sequenceUpdater.sequence, new DummySequenceBarrier());
 
-		assertThat(sequence, is(0L));
+		assertThat(sequence, Matchers.is(0L));
 		nioWaitStrategy.close();
 	}
 

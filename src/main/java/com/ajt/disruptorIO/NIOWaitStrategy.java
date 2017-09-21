@@ -35,6 +35,7 @@ import com.lmax.disruptor.collections.Histogram;
 class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	private final Logger logger = LoggerFactory.getLogger(NIOWaitStrategy.class);
 	final NIOClock clock;
+	final boolean timerStats;
 
 	final Selector selector;
 	final NioSelectedKeySet selectedKeySet;
@@ -72,13 +73,19 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	}
 
 	public NIOWaitStrategy(final NIOClock clock) {
-		this.clock = clock;
+		this(clock, false);
+	}
 
+	public NIOWaitStrategy(final NIOClock clock, final boolean timerStats) {
+		this.clock = clock;
+		this.timerStats = timerStats;
 		logger.info("Created NIOWait with clock:{}", clock);
 		timerHeap = new PriorityQueue<>(255);
 		timerLatencyReport = new TimerLatencyReport(this);
 		timerLatencyReport.timerHandler = createTimer(timerLatencyReport.callback, "TimerLatencyReport");
-		timerLatencyReport.timerHandler.fireIn(timerLatencyReport.timerReportInterval);
+		if (timerStats) {
+			timerLatencyReport.timerHandler.fireIn(timerLatencyReport.timerReportInterval);
+		}
 
 		strategyExecutor = new NIOWaitStrategyExecutor(this);
 		setNanoTime();
@@ -230,9 +237,10 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			if (tookToRun > SLOW_TIMER_WARN) {
 				logger.warn("Slow timer took:{} name:{}", tookToRun, handler.timerName);
 			}
-
-			handler.timerHistogram.addObservation(tookToRun);
-			handler.lateBy.addObservation(timerLateBy);
+			if (timerStats) {
+				handler.timerHistogram.addObservation(tookToRun);
+				handler.lateBy.addObservation(timerLateBy);
+			}
 		}
 	}
 
@@ -408,21 +416,37 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 	@Override
 	public void close() throws Exception {
-		logger.info("Closing selector");
+		logger.info("Closing selector timerDepth:{}", timerHeap.size());
 		if (isClosed) {
 			logger.info("Already closed");
 			return;
 		}
+		isClosed = true;
+
+
 		timerLatencyReport.callback.timerCallback(0, 0);
+
 		strategyExecutor.close();
 		selector.wakeup();
+
 		try {
 			selector.close();
 		} catch (final IOException ex) {
 			logger.info("Error closing selector", ex);
 		}
-		isClosed = true;
 
+		int counter = 256;
+		if (timerStats) {
+			logger.info("timerStats currentTime:{}", currentTimeNanos);
+			timerLatencyReport.callback.timerCallback(0, 0);
+		}
+		while (timerHeap.size() > 0 && counter-- > 0) {
+			MyTimerHandler timer = timerHeap.poll();
+			logger.info("outstanding timer:{} at:{} in(us):{}", timer.timerName, timer.nanoTimeWillFireAfter,
+					TimeUnit.NANOSECONDS.toMicros(timer.nanoTimeWillFireAfter - timer.currentNanoTime()));
+		}
+
+		logger.info("Close complete");
 	}
 
 	/**

@@ -31,14 +31,14 @@ class TimerLatencyReport {
 		timerList = new ArrayList<>(32);
 	}
 
-	void addTimerHandler(MyTimerHandler th) {
+	void addTimerHandler(final MyTimerHandler th) {
 		timerList.add(th);
 	}
 
 	class TimerLatencyCallbackImpl implements TimerCallback {
 
 		@Override
-		public void timerCallback(long dueAt, long currentNanoTime) {
+		public void timerCallback(final long dueAt, final long currentNanoTime) {
 			for (int a = 0; a < timerList.size(); a++) {
 				final MyTimerHandler mth = timerList.get(a);
 				if (mth.timerHistogram.getCount() > 0) {

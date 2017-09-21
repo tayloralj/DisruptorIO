@@ -56,7 +56,12 @@ class NIOWaitStrategyExecutor {
 	}
 
 	void close() {
-		logger.info("Closing");
+		logger.info("Exector Close unscheduled Jobs:{}", queue.size());
+		int maxDump = 256; // protection
+		while (queue.size() > 0 && maxDump-- > 0) {
+			final TimerScheduledFuture<?> future = queue.poll();
+			logger.info("job not scheduled timer:{}", future);
+		}
 		isShutdown = true;
 	}
 

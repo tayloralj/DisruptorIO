@@ -5,11 +5,9 @@ import static org.junit.Assert.assertThat;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.channels.SelectableChannel;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.SocketChannel;
 import java.util.LinkedList;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -27,7 +25,6 @@ import org.slf4j.LoggerFactory;
 import com.ajt.disruptorIO.NIOWaitStrategy.TimerCallback;
 import com.ajt.disruptorIO.NIOWaitStrategy.TimerHandler;
 import com.ajt.disruptorIO.SenderHelper.SenderCallin;
-import com.lmax.disruptor.EventFactory;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.ExceptionHandler;
 import com.lmax.disruptor.InsufficientCapacityException;
@@ -59,42 +56,6 @@ public class NIOWaitSelector2NIO2 {
 				2000000, 5000000, 5000000 * 4, 5000000 * 10, 5000000 * 20, 5000000 * 50 });
 	}
 
-	static long getLongFromArray(final byte[] data, final int offset) {
-		return ((long) (data[offset + 0]) << 56) + //
-				(((long) data[offset + 1] & 0xFF) << 48) + //
-				(((long) data[offset + 2] & 0xFF) << 40) + //
-				(((long) data[offset + 3] & 0xFF) << 32) + //
-				(((long) data[offset + 4] & 0xFF) << 24) + //
-				(((long) data[offset + 5] & 0xFF) << 16) + //
-				(((long) data[offset + 6] & 0xFF) << 8) + //
-				(((long) data[offset + 7] & 0xFF));
-	}
-
-	static int getIntFromArray(final byte[] data, final int offset) {
-		return ((int) (data[offset + 0]) << 24) + //
-				(((int) data[offset + 1] & 0xFF) << 16) + //
-				(((int) data[offset + 2] & 0xFF) << 8) + //
-				(((int) data[offset + 3] & 0xFF));
-	}
-
-	static void putLongToArray(final byte[] data, final int offset, final long value) {
-		data[offset + 0] = (byte) ((value >> 56) & 0xFF);
-		data[offset + 1] = (byte) ((value >> 48) & 0xFF);
-		data[offset + 2] = (byte) ((value >> 40) & 0xFF);
-		data[offset + 3] = (byte) ((value >> 32) & 0xFF);
-		data[offset + 4] = (byte) ((value >> 24) & 0xFF);
-		data[offset + 5] = (byte) ((value >> 16) & 0xFF);
-		data[offset + 6] = (byte) ((value >> 8) & 0xFF);
-		data[offset + 7] = (byte) ((value) & 0xFF);
-	}
-
-	static void putIntToArray(final byte[] data, final int offset, final int value) {
-		data[offset + 0] = (byte) ((value >> 24) & 0xFF);
-		data[offset + 1] = (byte) ((value >> 16) & 0xFF);
-		data[offset + 2] = (byte) ((value >> 8) & 0xFF);
-		data[offset + 3] = (byte) ((value) & 0xFF);
-	}
-
 	@Before
 	public void setup() {
 
@@ -118,7 +79,7 @@ public class NIOWaitSelector2NIO2 {
 				return th;
 			}
 		};
-		errorHandler = new ExceptionHandler<NIOWaitSelector2NIO2.TestEvent>() {
+		errorHandler = new ExceptionHandler<TestEvent>() {
 
 			@Override
 			public void handleOnStartException(Throwable ex) {
@@ -136,8 +97,8 @@ public class NIOWaitSelector2NIO2 {
 
 			}
 		};
-		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true);
-		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true);
+		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), false);
+		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), false);
 		int ringBufferSize = 2048;
 		disruptorServer = new Disruptor<>(TestEvent.EVENT_FACTORY, ringBufferSize, threadFactoryServer,
 				ProducerType.SINGLE, nioWaitStrategyServer);
@@ -158,7 +119,12 @@ public class NIOWaitSelector2NIO2 {
 		} catch (Exception e) {
 			logger.info("Error closing nioWait", e);
 		}
+		for (int a = 0; a < handlers.length; a++) {
+			handlers[a].close();
+			handlers[a] = null;
+		}
 		handlers = null;
+
 		threadFactoryServer = null;
 
 		disruptorClient.shutdown();
@@ -173,12 +139,12 @@ public class NIOWaitSelector2NIO2 {
 
 	@Test
 	public void testServerConnection() throws Exception {
-		final long toSend = 100_000_000L;
-		final long messageratePerSecond = 10_000_000L;
+		final long toSend = 1000_000_000L;
+		final long messageratePerSecond = 1_00_000L;
 		final long readRatePerSecond = 1_000_000L;
 		final long writeRatePerSecond = 1_000_000L;
 		final int clientCount = 2;
-		handlers = new TestEventServer[] { new TestEventServer(nioWaitStrategyServer, false) };
+		handlers = new TestEventServer[] { new TestEventServer(nioWaitStrategyServer, false, null) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, false);
 	}
@@ -191,9 +157,6 @@ public class NIOWaitSelector2NIO2 {
 					messageratePerSecond);
 
 			disruptorServer.start();
-			nioWaitStrategyServer.getScheduledExecutor().execute(() -> {
-				handlers[0].newServer(null);
-			});
 
 			final long maxWaitForBind = System.currentTimeMillis() + 10000;
 			while (System.currentTimeMillis() < maxWaitForBind && handlers[0].remoteAddress == null) {
@@ -205,7 +168,7 @@ public class NIOWaitSelector2NIO2 {
 
 			// create a client set using the client disruptor
 			final TestEventClient tc = new TestEventClient(clients, writeRatePerSecond, readRatePerSecond,
-					handlers[0].remoteAddress, nioWaitStrategyClient);
+					(InetSocketAddress) handlers[0].remoteAddress, nioWaitStrategyClient);
 			disruptorClient.handleEventsWith(new TestEventClient[] { tc });
 			disruptorClient.start();
 
@@ -238,8 +201,8 @@ public class NIOWaitSelector2NIO2 {
 						final TestEvent te = rb.get(sequenceNum);
 						te.type = TestEvent.EventType.data;
 						te.targetID = b;
-						putLongToArray(byteDataToSend, TestEvent.Offsets.time, System.nanoTime());
-						putLongToArray(byteDataToSend, TestEvent.Offsets.seqnum, sequenceNum);
+						TestEvent.putLongToArray(byteDataToSend, TestEvent.Offsets.time, System.nanoTime());
+						TestEvent.putLongToArray(byteDataToSend, TestEvent.Offsets.seqnum, sequenceNum);
 
 						te.setData(byteDataToSend, 0, byteDataToSend.length, TestEvent.MessageType.dataEvent);
 						te.nanoSendTime = System.nanoTime();
@@ -279,7 +242,7 @@ public class NIOWaitSelector2NIO2 {
 			// pass to the disruptor thread.
 			nioWaitStrategyServer.getScheduledExecutor().execute(() -> {
 				logger.info("Closing server");
-				handlers[0].closeServer();
+				handlers[0].close();
 			});
 			Thread.sleep(50);
 		} finally {
@@ -293,9 +256,10 @@ public class NIOWaitSelector2NIO2 {
 		final int count;
 		final long writeRatePerSecond;
 		final long readRatePerSecond;
-		final SocketAddress sa;
-		final NIOClientConnector[] clients;
-		final NIOWaitStrategy nioWait;
+		final InetSocketAddress sa;
+		final NIOClientConnection[] clients;
+		final SenderHelper helper;
+
 		boolean isRunning = false;
 		long _startTimeNanos = 0;
 		long _currentTimeNanos = 0;
@@ -303,22 +267,41 @@ public class NIOWaitSelector2NIO2 {
 		public TestEventClient(final int count, //
 				final long writeRatePerSecond, //
 				final long readRatePerSecond, //
-				final SocketAddress sa, //
+				final InetSocketAddress sa, //
 				final NIOWaitStrategy nioWait) {
 			this.sa = sa;
 			this.count = count;
 			this.writeRatePerSecond = writeRatePerSecond;
 			this.readRatePerSecond = readRatePerSecond;
-			this.nioWait = nioWait;
-			clients = new NIOClientConnector[count];
+			helper = new SenderHelper(nioWait);
+			clients = new NIOClientConnection[count];
 			for (int a = 0; a < count; a++) {
-				clients[a] = new NIOClientConnector(a);
+				clients[a] = new NIOClientConnection(a, sa, nioWait);
+			}
+		}
+
+		@Override
+		public void onEvent(TestEvent event, long sequence, boolean endOfBatch) throws Exception {
+			logger.warn("Not exepecting callback");
+		}
+
+		void start() {
+			try {
+				logger.info("Start");
+				for (int a = 0; a < count; a++) {
+
+					helper.connectTo(sa, clients[a]);
+
+				}
+			} catch (Exception e) {
+				logger.error("Error during start", e);
+				Assert.fail("fail during start;" + e);
 			}
 		}
 
 		/** print out some stats */
 		public void close() {
-
+			isRunning = false;
 			for (int c = 0; c < clients.length; c++) {
 				if (clients[c] != null) {
 
@@ -342,36 +325,7 @@ public class NIOWaitSelector2NIO2 {
 
 		}
 
-		@Override
-		public void onEvent(TestEvent event, long sequence, boolean endOfBatch) throws Exception {
-			// ignore all events }
-		}
-
-		void start() {
-			try {
-				logger.info("Start");
-				for (int a = 0; a < count; a++) {
-					final SocketChannel sc = SocketChannel.open();
-					sc.configureBlocking(false);
-					sc.connect(sa);
-					logger.info("Start [" + a + "]:" + sa);
-
-					final SelectionKey sk = nioWait.registerSelectableChannel(sc, clients[a]);
-					sk.interestOps(SelectionKey.OP_CONNECT);
-					clients[a].sk = sk;
-					clients[a].sc = sc;
-				}
-			} catch (Exception e) {
-				logger.error("Error during start", e);
-				Assert.fail("fail during start;" + e);
-			}
-		}
-
-		void closeServer() throws Exception {
-			isRunning = false;
-		}
-
-		class NIOClientConnector implements NIOWaitStrategy.SelectorCallback {
+		class NIOClientConnection implements SenderHelper.SenderCallback {
 			boolean isRunning = true;
 			long readShouldBeAtLeast = 0;
 			long writeShouldBeAtLeast = 0;
@@ -381,8 +335,7 @@ public class NIOWaitSelector2NIO2 {
 			long bytesReadCount = 0;
 			long bytesWritten = 0;
 			long recvMsgCount = 0;
-			SelectionKey sk;
-			SocketChannel sc;
+
 			final byte[] readBytes;
 			final byte[] writeBytes;
 			long messageCounter = 0;
@@ -397,9 +350,12 @@ public class NIOWaitSelector2NIO2 {
 			final int id;
 			final Histogram propHisto = getHisto();
 			final Histogram rttHisto = getHisto();
+			SenderCallin callin;
+			final SocketAddress sa;
 
-			public NIOClientConnector(final int id) {
+			public NIOClientConnection(int id, SocketAddress sa, NIOWaitStrategy nioWait) {
 				this.id = id;
+				this.sa = sa;
 				writeBytes = new byte[256];
 				for (int a = 0; a < writeBytes.length; a++) {
 					writeBytes[a] = (byte) a;
@@ -414,162 +370,118 @@ public class NIOWaitSelector2NIO2 {
 
 			}
 
+			@Override
+			public void connected(final SenderCallin callin) {
+
+				timerHandler.fireIn(0);
+				startTimeNano = timerHandler.currentNanoTime();
+				this.callin = callin;
+				logger.info("opConnect Complete :" + callin.getLocalAddress() + " " + callin.getRemoteAddress() + " ");
+
+			}
+
+			@Override
+			public void blocked(final SenderCallin callin) {
+				logger.info("blocked write callin:{}", callin);
+				blocked = true;
+			}
+
+			@Override
+			public void unblocked(final SenderCallin callin) {
+				logger.info("unblocked write callin:{}", callin);
+				blocked = false;
+			}
+
+			@Override
+			public void readData(final SenderCallin callin, final ByteBuffer buffer) {
+				bytesReadCount++;
+				bytesRead += buffer.remaining();
+				readBuffer.put(buffer);
+				int bufferPosition = readBuffer.position(); // point in buffer of last read byte
+				int startPosition = 0;
+
+				readBuffer.position(startPosition);
+				readBuffer.limit(bufferPosition);
+				while (true) {
+					if (readBuffer.limit() - readBuffer.position() < 8) {
+						if (logger.isTraceEnabled()) {
+							logger.trace("SHort Buff COMPACT :{} :{}", readBuffer.limit(), readBuffer.position());
+						}
+						readBuffer.compact();
+						break;
+					}
+					final int length = TestEvent.getIntFromArray(readBytes,
+							readBuffer.position() + TestEvent.Offsets.length);
+					assertThat(" posn:" + readBuffer.position() + " lim:" + readBuffer.limit(), //
+							length, Matchers.greaterThan(16));
+					//
+					if (startPosition + length <= readBuffer.limit()) {
+						// got a full message
+						final int type = TestEvent.getIntFromArray(readBytes, readBuffer.position() + 4);
+						switch (type) {
+						case TestEvent.MessageType.clientMessage:
+							logger.debug("unknown type");
+							break;
+						case TestEvent.MessageType.dataEvent:
+							final long sendTime = TestEvent.getLongFromArray(readBytes,
+									readBuffer.position() + TestEvent.Offsets.time);
+							final long nowNanoTime = System.nanoTime();
+							propHisto.addObservation(nowNanoTime - sendTime);
+							// occasional logging
+							if ((messageReadCount & ((256 * 1024) - 1)) == 0) {
+								logger.info("id:{} Prop Histo:{} {}", id, propHisto.getCount(), propHisto.toString());
+								propHisto.clear();
+
+								logger.debug(
+										"Took to recv:{} len:{} posn:{} lim:{} readCount:{} bytesRead:{} bytesReadCount:{}",
+										(nowNanoTime - sendTime), length, startPosition, readBuffer.limit(), bytesRead,
+										bytesRead, bytesReadCount);
+
+							}
+							messageReadCount++;
+							break;
+						case TestEvent.MessageType.serverMessage:
+							// logger.debug("ServerRTTMessage");
+							break;
+						default:
+							Assert.fail("Error unknown message type:" + type + " len:" + length);
+						}
+						startPosition += length;
+						if (startPosition == readBuffer.limit()) {
+							readBuffer.clear();
+							break;
+						} else {
+							assertThat(startPosition, Matchers.lessThan(readBuffer.limit()));
+							readBuffer.position(startPosition);
+						}
+					} else {
+						if (logger.isTraceEnabled()) {
+							logger.info("Client COMPACT posn:{} lim:{}", readBuffer.position(), readBuffer.limit());
+						}
+						readBuffer.compact();
+						break;
+					}
+				}
+
+			}
+
+			@Override
+			public void closed(final SenderCallin callin) {
+				logger.info("Close from callin:{}", callin);
+				close();
+
+			}
+
 			public void close() {
-				logger.info("CLientClosing:" + bytesRead);
+				if (isRunning == false) {
+					return;
+				}
+				logger.info("ClientClosing:" + bytesRead);
 				logger.info("Propogate time Histo:{} {}", propHisto.getCount(), propHisto.toString());
 				logger.info("RTT time Histo:{} {}", rttHisto.getCount(), rttHisto.toString());
 				propHisto.clear();
 				isRunning = false;
-				logger.info("Closing:" + sk + " " + sc);
-				try {
-					sk.cancel();
-					sc.close();
-					sc = null;
-					sk = null;
-				} catch (Exception e) {
 
-				}
-			}
-
-			@Override
-			public void opRead(final SelectableChannel channel, final long currentTimeNanos) {
-				bytesReadCallback++;
-				_currentTimeNanos = currentTimeNanos;
-				try {
-					final SocketChannel sk = (SocketChannel) channel;
-					if (sk.isConnected()) {
-						for (int a = 0; a < 20; a++) {
-							final long readCount = sk.read(readBuffer);
-							if (readCount == 0) {
-								break;
-							} else if (readCount == -1) {
-								close();
-							} else {
-								bytesReadCount++;
-								bytesRead += readCount;
-								int bufferPosition = readBuffer.position(); // point in buffer of last read byte
-								int startPosition = 0;
-
-								readBuffer.position(startPosition);
-								readBuffer.limit(bufferPosition);
-								while (true) {
-									if (readBuffer.limit() - readBuffer.position() < 8) {
-										logger.info("SHort Buff COMPACT");
-										readBuffer.compact();
-										break;
-									}
-									final int length = getIntFromArray(readBytes,
-											readBuffer.position() + TestEvent.Offsets.length);
-									assertThat(" posn:" + readBuffer.position() + " lim:" + readBuffer.limit(), //
-											length, Matchers.greaterThan(16));
-									//
-									if (startPosition + length <= readBuffer.limit()) {
-										// got a full message
-										final int type = getIntFromArray(readBytes, readBuffer.position() + 4);
-										switch (type) {
-										case TestEvent.MessageType.clientMessage:
-											logger.debug("unknown type");
-											break;
-										case TestEvent.MessageType.dataEvent:
-											final long sendTime = getLongFromArray(readBytes,
-													readBuffer.position() + TestEvent.Offsets.time);
-											final long nowNanoTime = System.nanoTime();
-											propHisto.addObservation(nowNanoTime - sendTime);
-											// occasional logging
-											if ((messageReadCount & ((256 * 1024) - 1)) == 0) {
-												logger.info("id:{} Prop Histo:{} {}", id, propHisto.getCount(),
-														propHisto.toString());
-												propHisto.clear();
-
-												logger.debug(
-														"Took to recv:{} len:{} posn:{} lim:{} readCount:{} bytesRead:{} bytesReadCount:{}",
-														(nowNanoTime - sendTime), length, startPosition,
-														readBuffer.limit(), readCount, bytesRead, bytesReadCount);
-
-											}
-											messageReadCount++;
-											break;
-										case TestEvent.MessageType.serverMessage:
-											// logger.debug("ServerRTTMessage");
-											break;
-										default:
-											Assert.fail("Error unknown message type:" + type + " len:" + length);
-										}
-										startPosition += length;
-										if (startPosition == readBuffer.limit()) {
-											readBuffer.clear();
-											break;
-										} else {
-											assertThat(startPosition, Matchers.lessThan(readBuffer.limit()));
-											readBuffer.position(startPosition);
-										}
-									} else {
-										logger.info("Client COMPACT posn:{} lim:{}", readBuffer.position(),
-												readBuffer.limit());
-										readBuffer.compact();
-										break;
-									}
-								}
-							}
-						}
-					} else {
-						close();
-					}
-				} catch (Exception e) {
-					logger.error("Error", e);
-				}
-			}
-
-			@Override
-			public void opAccept(SelectableChannel channel, long currentTimeNanos) {
-				logger.error("Error not execpting accept");
-
-			}
-
-			@Override
-			public void opConnect(SelectableChannel channel, long currentTimeNanos) {
-				_startTimeNanos = currentTimeNanos;
-				logger.info("opConnect:" + channel + " " + sk.interestOps());
-				try {
-					final SocketChannel sc = (SocketChannel) channel;
-					sc.configureBlocking(false);
-					final boolean finishConnect = sc.finishConnect();
-					SelectionKey sk2 = sk.interestOps(SelectionKey.OP_READ);
-
-					timerHandler.fireIn(0);
-					startTimeNano = timerHandler.currentNanoTime();
-
-					logger.info("opConnect Complete :" + channel + " " + sk.interestOps() + " " + sk2.interestOps()
-							+ " " + finishConnect);
-				} catch (Exception e) {
-					logger.error("Error connecting", e);
-				}
-			}
-
-			@Override
-			public void opWrite(final SelectableChannel channel, final long currentTimeNanos) {
-				if (blocked) {
-					try {
-						final int remaining = writeBuffer.remaining();
-						final int bytesWrittenCycle = sc.write(writeBuffer);
-						if (bytesWrittenCycle == -1) {
-							close();
-							return;
-						} else if (bytesWrittenCycle < remaining) {
-							// remain written;
-						} else {
-							sk.interestOps(SelectionKey.OP_READ);
-							blocked = false;
-							timerHandler.fireIn(0);
-						}
-						bytesWritten += bytesWrittenCycle;
-					} catch (Exception e) {
-						logger.info("Error cycle write error", e);
-						close();
-					}
-				} else {
-
-				}
 			}
 
 			class TimerSenderCallback implements TimerCallback {
@@ -581,39 +493,22 @@ public class NIOWaitSelector2NIO2 {
 							timerHandler.fireIn(slowTimer);
 							return;
 						}
-						if (sk == null || sc == null) {
-							timerHandler.fireIn(slowTimer);
-							return;
-						}
+
 						final long elapsed = currentNanoTime - startTimeNano;
 
 						while (elapsed * writeRatePerSecond > bytesWritten * 1000000000L) {
 
-							putIntToArray(writeBytes, TestEvent.Offsets.type, TestEvent.MessageType.clientMessage);
-							putIntToArray(writeBytes, TestEvent.Offsets.length, writeBytes.length);
-							putLongToArray(writeBytes, TestEvent.Offsets.time, System.nanoTime());
-							putLongToArray(writeBytes, TestEvent.Offsets.seqnum, messageCounter++);
+							TestEvent.putIntToArray(writeBytes, TestEvent.Offsets.type,
+									TestEvent.MessageType.clientMessage);
+							TestEvent.putIntToArray(writeBytes, TestEvent.Offsets.length, writeBytes.length);
+							TestEvent.putLongToArray(writeBytes, TestEvent.Offsets.time, System.nanoTime());
+							TestEvent.putLongToArray(writeBytes, TestEvent.Offsets.seqnum, messageCounter++);
 
 							writeBuffer.position(0);
 							writeBuffer.limit(writeBytes.length);
-
-							final int bytesWrittenCycle = sc.write(writeBuffer);
-							if (bytesWrittenCycle == -1) {
-								close();
-								return;
-							} else if (bytesWrittenCycle < writeBuffer.capacity()) {
-								logger.debug("client:{} blocked writing:{} counter:{}", id, bytesWritten,
-										messageCounter);
-								sk.interestOps(SelectionKey.OP_READ + SelectionKey.OP_WRITE);
-								blocked = true;
-								writeBuffer.compact();
-								bytesWritten += bytesWrittenCycle;
-								timerHandler.fireIn(slowTimer);
-								break;
-							} else {
-								bytesWritten += bytesWrittenCycle;
-							}
+							callin.sendMessage(writeBytes, 0, writeBytes.length);
 						}
+						callin.flush();
 						timerHandler.fireIn(fastTimer);
 
 					} catch (final Exception e) {
@@ -628,24 +523,30 @@ public class NIOWaitSelector2NIO2 {
 
 	}
 
-	public static class TestEventServer implements EventHandler<TestEvent> {
+	public static class TestEventServer implements EventHandler<TestEvent>, AutoCloseable {
 		private final Logger logger = LoggerFactory.getLogger(TestEventServer.class);
 		private final AtomicLong counter = new AtomicLong();
-
 		private final boolean coalsce;
 		private final Histogram elapsedHisto = getHisto();
 		private final Histogram delayHisto = getHisto();
-
-		private SenderCallin serverCallin;
-
-		private EstablishedServerConnectionCallback[] ecc = new EstablishedServerConnectionCallback[128];
-		final SenderHelper serverSenderHelper;
+		private final EstablishedServerConnectionCallback[] ecc = new EstablishedServerConnectionCallback[128];
+		private final SenderHelper serverSenderHelper;
 
 		public volatile SocketAddress remoteAddress = null;
+		private SenderCallin serverCallin;
 
-		public TestEventServer(NIOWaitStrategy waiter, boolean compact) {
+		public TestEventServer(final NIOWaitStrategy waiter, final boolean compact, final InetSocketAddress address) {
 			coalsce = compact;
 			serverSenderHelper = new SenderHelper(waiter);
+			try {
+				serverCallin = serverSenderHelper.bindTo(address, new NIOServerCallback());
+
+				remoteAddress = serverCallin.getRemoteAddress();
+
+			} catch (Exception e) {
+				logger.error("Error", e);
+				Assert.fail("Fail due to exception" + e);
+			}
 		}
 
 		@Override
@@ -653,7 +554,21 @@ public class NIOWaitSelector2NIO2 {
 			final long now = System.nanoTime();
 			switch (event.type) {
 			case data:
-				handleData(event, sequence, endOfBatch);
+				if (ecc[event.targetID] == null) {
+					if (endOfBatch) {
+						logger.error("Erro no connection with targetID:{})", event.targetID);
+					}
+					return;
+				}
+				ecc[event.targetID].handleData(event, sequence, endOfBatch);
+				// flush anything without a batch
+				if (endOfBatch) {
+					for (int a = 0; a < ecc.length; a++) {
+						if (ecc[a] != null && ecc[a].serverCallin.byteInBuffer() > 0) {
+							ecc[a].serverCallin.flush();
+						}
+					}
+				}
 				break;
 
 			default:
@@ -667,45 +582,17 @@ public class NIOWaitSelector2NIO2 {
 			elapsedHisto.addObservation(end - now);
 		}
 
-		void handleData(final TestEvent event, final long sequence, final boolean endOfBatch) throws Exception {
-			if (ecc[event.targetID] == null) {
-				if (endOfBatch) {
-					logger.error("Erro no connection with targetID:{})", event.targetID);
-				}
-				return;
-			}
-			ecc[event.targetID].handleData(event, sequence, endOfBatch);
-			// flush anything without a batch
-			if (endOfBatch) {
-				for (int a = 0; a < ecc.length; a++) {
-					if (ecc[a] != null && ecc[a].serverCallin.byteInBuffer() > 0) {
-						ecc[a].serverCallin.flush();
-					}
-				}
-			}
-		}
-
-		void closeServer() {
-			logger.info("CLOSESERVER");
-			logger.info("ElapsedHisto:" + elapsedHisto.getCount() + " " + elapsedHisto.toString());
-			logger.info("DelayHisto:" + delayHisto.getCount() + " " + delayHisto.toString());
+		public void close() {
+			logger.info("CLOSESERVER EventServer");
+			logger.info("ElapsedCallbackTime:" + elapsedHisto.getCount() + " " + elapsedHisto.toString());
+			logger.info("DelayDataTime:" + delayHisto.getCount() + " " + delayHisto.toString());
 
 			for (int a = 0; a < ecc.length; a++) {
 				if (ecc[a] != null) {
 					logger.info("closeServer id:{} ", a);
-					ecc[a].closeConnection();
+					ecc[a].close();
 					ecc[a] = null;
 				}
-			}
-		}
-
-		void newServer(final InetSocketAddress address) {
-			try {
-				serverCallin = serverSenderHelper.bindTo(address, new NIOServerCallback());
-				remoteAddress = serverCallin.getRemoteAddress();
-			} catch (Exception e) {
-				logger.error("Error", e);
-				Assert.fail("Fail due to exception" + e);
 			}
 		}
 
@@ -713,14 +600,14 @@ public class NIOWaitSelector2NIO2 {
 			private final Logger logger = LoggerFactory.getLogger(NIOServerCallback.class);
 
 			@Override
-			public SenderCallin connected(final SenderCallin callin) {
+			public void connected(final SenderCallin callin) {
 				logger.info("Connected callin:{}", callin);
 				remoteAddress = callin.getRemoteAddress();
 				for (int a = 0; a < ecc.length; a++) {
 					if (ecc[a] == null) {
 
 						final EstablishedServerConnectionCallback escc = new EstablishedServerConnectionCallback(callin,
-								a);
+								a, coalsce);
 						callin.setId(a);
 						ecc[a] = escc;
 						break;
@@ -734,23 +621,24 @@ public class NIOWaitSelector2NIO2 {
 						}
 					}
 				}
-				return null;
+
 			}
 
 			@Override
 			public void blocked(final SenderCallin callin) {
-				logger.info("blocked callin:{}", callin);
+				logger.info("blocked Server write callin:{}", callin);
 			}
 
 			@Override
 			public void unblocked(final SenderCallin callin) {
-				logger.info("unblocked callin:{}", callin);
+				logger.info("unblocked Server write  callin:{}", callin);
+				serverCallin.unblockRead();
 			}
 
 			@Override
 			public void closed(final SenderCallin callin) {
 				logger.info("closed callin:{}", callin);
-				ecc[callin.getId()].closeConnection();
+				ecc[callin.getId()].close();
 			}
 
 			@Override
@@ -760,7 +648,7 @@ public class NIOWaitSelector2NIO2 {
 					ecc[callin.getId()].read(buffer);
 				} catch (Exception e) {
 					logger.error("Error reading buffer", e);
-					ecc[callin.getId()].closeConnection();
+					ecc[callin.getId()].close();
 				}
 			}
 
@@ -774,18 +662,18 @@ public class NIOWaitSelector2NIO2 {
 		 * @author ajt
 		 *
 		 */
-		class EstablishedServerConnectionCallback {
+		private static class EstablishedServerConnectionCallback implements AutoCloseable {
 			private final Logger logger = LoggerFactory.getLogger(EstablishedServerConnectionCallback.class);
-			int maxQueueSize = 65536;
-			final LinkedList<byte[]> queue = new LinkedList<>();
+			private final int maxQueueSize = 65536;
+			private final LinkedList<byte[]> queue = new LinkedList<>();
 
-			boolean closed = false;
+			private boolean closed = false;
 
 			private final SenderCallin serverCallin;
 			private final int id;
 
 			private long totalRead = 0;
-			private long readCount = 0;
+
 			private long messageReadCount = 0;
 			private long readSignalCount = 0;
 			private long totalWriteSocket = 0;
@@ -793,17 +681,20 @@ public class NIOWaitSelector2NIO2 {
 			private long writeCount = 0;
 			private long dataLossCount = 0;
 			private long endOfBatchCount = 0;
+			private long messageCount = 0;
 
 			private final ByteBuffer readBuffer;
 			private final byte[] readBytes;
 			private long respSeqNum = 0;
 			private final ByteBuffer writeBuffer;
 			long lastLogErrorNano = System.nanoTime();
-			final Histogram propHisto = getHisto();
+			private final Histogram propHisto = getHisto();
+			private final boolean coalsce;
 
-			EstablishedServerConnectionCallback(final SenderCallin sc, int id) {
+			EstablishedServerConnectionCallback(final SenderCallin sc, final int id, final boolean coalsce) {
 				this.serverCallin = sc;
 				this.id = id;
+				this.coalsce = coalsce;
 				readBytes = new byte[sc.maxBuffer() * 2];
 				readBuffer = ByteBuffer.wrap(readBytes);
 				readBuffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -811,30 +702,10 @@ public class NIOWaitSelector2NIO2 {
 				writeBuffer.order(ByteOrder.LITTLE_ENDIAN);
 			}
 
-			private void closeConnection() {
-				if (closed) {
-					logger.warn("Already closed:{}", id);
-				}
-				closed = true;
-				logger.info(
-						"id:{} Closing Server socket:{} totalRead:{} readSignalCount:{} readiteration:{} totalWrite:{} writeSignalCount:{} writeCount:{}", //
-						id, serverCallin, totalRead, readSignalCount, readCount, totalWriteSocket, writeSignalCount,
-						writeCount);
-				logger.info("EndOfBatch:{} dataLoss:{}", endOfBatchCount, dataLossCount);
-				logger.info("id:{} ackCnt:{} Histo:{}", id, propHisto.getCount(), propHisto.toString());
-
-				try {
-					serverCallin.close();
-				} catch (Exception e) {
-					logger.error("Error closing socket", e);
-				}
-
-			}
-
 			public void handleData(final TestEvent event, final long sequence, final boolean endOfBatch)
 					throws Exception {
-
-				if (serverCallin.isBlocked() > 0) {
+				messageCount++;
+				if (serverCallin.isWriteBlocked() >= 0) {
 					if (coalsce) {
 						// drop data
 						logger.trace("Coalse: drop data size:{}", event.data.length);
@@ -842,7 +713,8 @@ public class NIOWaitSelector2NIO2 {
 						if (queue.size() > maxQueueSize) {
 							dataLossCount++;
 							if (System.nanoTime() - lastLogErrorNano > TimeUnit.MILLISECONDS.toNanos(100)) {
-								logger.error("Data lost: backlog exeeded count:{}", dataLossCount);
+								logger.error("Data lost: backlog exeeded count:{} callin:{}", dataLossCount,
+										serverCallin);
 								lastLogErrorNano = System.nanoTime();
 							}
 						} else {
@@ -859,25 +731,58 @@ public class NIOWaitSelector2NIO2 {
 					endOfBatchCount++;
 					if (serverCallin.flush() == 0) {
 						// wrote it all
+					} else {
+						// blocked
 					}
 				}
 			}
 
-			public void read(final ByteBuffer readData) throws IOException {
+			public void close() {
+				if (closed) {
+					logger.warn("Already closed:{}", id);
+					return;
+				}
+				closed = true;
+				logger.info("id:{} Closing Server socket:{}"//
+						+ "\n\tREAD_SERVER: totalBytesRead:{} messageReadCount:{} readSignalCount:{}"//
+						+ "\n\tWRITE_SERVER: totalWrite:{} writeSignalCount:{} writeCount:{}" //
+						+ "\n\tBATCH: BatchCound:{} EndOfBatch:{} dataLoss:{}"//
+						+ "\n\tHISTO: count:{} hist:{}", //
+						id, serverCallin, //
+						totalRead, messageReadCount, readSignalCount, //
+						totalWriteSocket, writeSignalCount, writeCount, //
+						messageCount, endOfBatchCount, dataLossCount, //
+						propHisto.getCount(), propHisto.toString());
 
+				try {
+					serverCallin.close();
+				} catch (Exception e) {
+					logger.error("Error closing socket", e);
+				}
+
+			}
+
+			public void read(final ByteBuffer readData) throws IOException {
+				logger.debug("SERVERREAD {} {} {} {}", readBuffer.position(), readBuffer.limit() + readData.position(),
+						readData.limit());
 				readSignalCount++;
 				final int bytesRead = readData.remaining();
 				totalRead += bytesRead;
 				// logger.info("Read:" + read);
-				if (readData.remaining() > readBuffer.remaining()) {
-					logger.error("Error not enogh space {} {} {} {}", readBuffer.position(), readBuffer.limit(),
+				if (readData.position() > readBuffer.remaining()) {
+					logger.error("Error not enough space {} {} {} {}", readBuffer.position(), readBuffer.limit(),
 							readData.position(), readData.limit());
 					Assert.fail();
 				}
 
-				readBuffer.put(readData);
+				try {
+					readBuffer.put(readData);
+				} catch (BufferOverflowException boe) {
+					logger.error("Error not enough space {} {} {} {}", readBuffer.position(), readBuffer.limit(),
+							readData.position(), readData.limit());
+					Assert.fail();
+				}
 
-				readCount++;
 				int bufferPosition = readBuffer.position(); // point in buffer of last read byte
 				int startPosition = 0;
 
@@ -885,62 +790,69 @@ public class NIOWaitSelector2NIO2 {
 				readBuffer.limit(bufferPosition);
 
 				while (readBuffer.limit() - readBuffer.position() > 4) {
-					final int length = getIntFromArray(readBytes, readBuffer.position() + TestEvent.Offsets.length);
+					final int length = TestEvent.getIntFromArray(readBytes,
+							readBuffer.position() + TestEvent.Offsets.length);
 					assertThat(length, Matchers.greaterThan(16));
 					if (startPosition + length <= readBuffer.limit()) {
 						// got a full message
-						final int type = getIntFromArray(readBytes, readBuffer.position() + TestEvent.Offsets.type);
+						final int type = TestEvent.getIntFromArray(readBytes,
+								readBuffer.position() + TestEvent.Offsets.type);
 						switch (type) {
 						case TestEvent.MessageType.clientMessage:
 
-							final long sendTime = getLongFromArray(readBytes,
+							messageReadCount++;
+							final long sendTime = TestEvent.getLongFromArray(readBytes,
 									readBuffer.position() + TestEvent.Offsets.time);
 							final long nowNanoTime = System.nanoTime();
 							propHisto.addObservation(nowNanoTime - sendTime);
 							// occasional logging
-							if ((messageReadCount & ((256 * 1024) - 1)) == 0) {
-								logger.info("id:{} Prop Histo:{} {}", id, propHisto.getCount(), propHisto.toString());
-								propHisto.clear();
-
-								logger.debug(
-										"Took to recv:{} len:{} posn:{} lim:{} readCount:{} bytesRead:{} bytesReadCount:{}",
-										(nowNanoTime - sendTime), length, startPosition, readBuffer.limit(), readCount,
-										bytesRead, totalRead);
-
-							}
+							/*
+							 * if ((messageReadCount & ((256 * 1024) - 1)) == 0) {
+							 * logger.info("id:{} Prop Histo:{} {}", id, propHisto.getCount(),
+							 * propHisto.toString()); propHisto.clear();
+							 * 
+							 * logger.debug(
+							 * "Took to recv:{} len:{} posn:{} lim:{} readCount:{} bytesRead:{} bytesReadCount:{}"
+							 * , (nowNanoTime - sendTime), length, startPosition, readBuffer.limit(),
+							 * readCount, bytesRead, totalRead);
+							 * 
+							 * }
+							 */
 							// return some data
-							if (0 == serverCallin.isBlocked()) {
+							if (serverCallin.isWriteBlocked() >= 0) {
 								if (serverCallin.bufferRemaining() < length) {
 									serverCallin.flush();
 									if (serverCallin.bufferRemaining() < length) {
+										logger.info("blocked write - some data remaining callin:{}", serverCallin);
+										serverCallin.blockRead();
+										readBuffer.compact();
 										return;
 									}
 								}
-								putIntToArray(readBytes, startPosition + TestEvent.Offsets.type,
+								TestEvent.putIntToArray(readBytes, startPosition + TestEvent.Offsets.type,
 										TestEvent.MessageType.serverMessage);
 
-								putLongToArray(readBytes, startPosition + TestEvent.Offsets.responsTime,
+								TestEvent.putLongToArray(readBytes, startPosition + TestEvent.Offsets.responsTime,
 										System.nanoTime());
-								putLongToArray(readBytes, startPosition + TestEvent.Offsets.respSeqNum, respSeqNum++);
+								TestEvent.putLongToArray(readBytes, startPosition + TestEvent.Offsets.respSeqNum,
+										respSeqNum++);
 								serverCallin.sendMessage(readBytes, startPosition, length);
-
 							}
-							messageReadCount++;
 							break;
 						case TestEvent.MessageType.dataEvent:
-							closeConnection();
+							close();
 							Assert.fail("unexpected dataEvent");
 						case TestEvent.MessageType.serverMessage:
-							closeConnection();
+							close();
 							Assert.fail("unexpected serverMessage");
 						default:
-							closeConnection();
+							close();
 							Assert.fail("Error unknown message type:" + type + " len:" + length);
 						}
 						startPosition += length;
 						if (startPosition == readBuffer.limit()) {
 							readBuffer.clear();
-							break;
+							return;
 						} else {
 							assertThat(startPosition, Matchers.lessThan(readBuffer.limit()));
 							readBuffer.position(startPosition);
@@ -949,79 +861,15 @@ public class NIOWaitSelector2NIO2 {
 						logger.info("COMPACT posn:{} Lim:{}", readBuffer.position(), readBuffer.limit());
 						readBuffer.compact();
 						logger.info("COMPACT posn:{} Lim:{}", readBuffer.position(), readBuffer.limit());
-						break;
+						return;
 					}
 
 				}
+				logger.info("out of loop");
+				logger.error("Error not enough space {} {} {} {}", readBuffer.position(), readBuffer.limit(),
+						readData.position(), readData.limit());
 			}
 		}
-
-	}
-
-	private static final class TestEvent {
-		enum EventType {
-			data, newServer, close, UNKNOWN;
-		}
-
-		interface MessageType {
-			int dataEvent = 1;
-			int clientMessage = 2;
-			int serverMessage = 3;
-
-		}
-
-		private EventType type = EventType.UNKNOWN;
-		private byte[] data = null;
-		private int targetID = 0;
-		private final long seqNum;
-		private long nanoSendTime = 0;
-		private static long counter = 0;
-		private final ByteBuffer writeBuffer;
-		private final ByteBuffer readBuffer;
-
-		interface Offsets {
-			int length = 0;
-			int type = 4;
-			int seqnum = 8;
-			int respSeqNum = 16;
-			int time = 24;
-			int responsTime = 32;
-		}
-
-		private TestEvent() {
-			seqNum = counter++;
-			data = new byte[4096];
-			writeBuffer = ByteBuffer.wrap(data);
-			writeBuffer.order(ByteOrder.LITTLE_ENDIAN);
-			readBuffer = ByteBuffer.wrap(data);
-			readBuffer.order(ByteOrder.LITTLE_ENDIAN);
-		}
-
-		public void setData(final byte[] data_, final int offset, final int length, final int type) {
-			writeBuffer.clear();
-			writeBuffer.put(data_, offset, length);
-			putIntToArray(data, Offsets.length, length);
-			putIntToArray(data, Offsets.type, type);
-		}
-
-		public int getLength() {
-			return getIntFromArray(data, Offsets.length);
-		}
-
-		public int getType() {
-			return getIntFromArray(data, Offsets.type);
-		}
-
-		public byte[] getData() {
-			return data;
-		}
-
-		public static final EventFactory<TestEvent> EVENT_FACTORY = new EventFactory<TestEvent>() {
-			@Override
-			public TestEvent newInstance() {
-				return new TestEvent();
-			}
-		};
 
 	}
 

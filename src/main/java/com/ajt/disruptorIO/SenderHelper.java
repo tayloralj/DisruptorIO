@@ -45,6 +45,7 @@ public class SenderHelper {
 		final ServerSocketChannel socketChannel = ServerSocketChannel.open();
 		socketChannel.configureBlocking(false);
 		socketChannel.bind(local, 0);
+
 		logger.info("bindTo:{} channel:{}", local, socketChannel);
 
 		final IOHandler IOh = new IOHandler(socketChannel, callback);
@@ -64,9 +65,18 @@ public class SenderHelper {
 		private final byte[] readBytes;
 		private final byte[] writeBytes;
 		private boolean isClosed = false;
-		private boolean isBlocked = false;
+		private boolean isWriteBlocked = false;
 		private long blockStartAt = 0;
 		private final int counter;
+		private int id;
+		private boolean isReadBlocked = false;
+		// some basic stats
+		private long bytesWritten = 0;
+		private long bytesRead = 0;
+		private long opReadCallback = 0;
+		private long opWriteCallback = 0;
+		private long messageSendCount = 0;
+		private long flushCount = 0;
 
 		public IOHandler(final ServerSocketChannel ssc, final SenderCallback callback)
 				throws IOException, ClosedChannelException {
@@ -109,6 +119,25 @@ public class SenderHelper {
 
 		}
 
+		@Override
+		public String toString() {
+			// dump out all we know.
+			return "localAddress:" + getLocalAddress()//
+					+ " remoteAddress:" + getRemoteAddress()//
+					+ " id:" + id//
+					+ " instanceCounter:" + counter//
+					+ " isClosed:" + isClosed//
+					+ " isWriteBlocked:" + isWriteBlocked()//
+					+ " isReadBlocked:" + isReadBlocked()//
+					+ " skInt:" + ((sk == null) ? "SK=NULL" : sk.interestOps())//
+					+ " bytesWritten:" + bytesWritten//
+					+ " bytesRead:" + bytesRead//
+					+ " opReadCallback:" + opReadCallback//
+					+ " opWriteCallback:" + opWriteCallback//
+					+ " messageSendCount:" + messageSendCount//
+					+ " flushCount:" + flushCount;
+		}
+
 		public int maxBuffer() {
 			return readBytes.length;
 		}
@@ -119,23 +148,24 @@ public class SenderHelper {
 
 		@Override
 		public void opRead(final SelectableChannel channel, final long currentTimeNanos) {
-
+			opReadCallback++;
 			try {
-				int bytesRead = -1;
-				int readCounter = 20;
+				int callbackBytesRead = -1;
+				int readCounter = 0;
 				do {
-					bytesRead = socketChannel.read(readBuffer);
-					if (bytesRead == -1) {
+					callbackBytesRead = socketChannel.read(readBuffer);
+					if (callbackBytesRead == -1) {
 						close();
 						break;
 					}
-					if (bytesRead == 0) {
+					if (callbackBytesRead == 0) {
 						break;
 					}
 					readBuffer.flip();
 					callback.readData(this, readBuffer);
 					readBuffer.clear();
-				} while (bytesRead > 0 && readCounter-- > 0);
+					bytesRead += callbackBytesRead;
+				} while (callbackBytesRead > 0 && readCounter-- > 0);
 			} catch (Exception e) {
 				logger.error("Error on read", e);
 				close();
@@ -148,6 +178,7 @@ public class SenderHelper {
 			try {
 				final SocketChannel socketChannel = serverSocketChannel.accept();
 				socketChannel.configureBlocking(false);
+
 				remoteAddress = socketChannel.getRemoteAddress();
 				final IOHandler handler = new IOHandler(socketChannel, callback);
 				final SelectionKey key = wait.registerSelectableChannel(socketChannel, handler);
@@ -155,10 +186,11 @@ public class SenderHelper {
 				key.interestOps(SelectionKey.OP_READ);
 
 				handler.remoteAddress = socketChannel.getRemoteAddress();
+
 				handler.localAddress = socketChannel.getLocalAddress();
 
-				logger.info("opAccept local:{} remote:{}", localAddress, remoteAddress);
 				callback.connected(handler);
+				logger.info("opAccept local:{} remote:{}", localAddress, remoteAddress);
 			} catch (IOException ioe) {
 				logger.error("Error connecting to server socket:", ioe);
 				close();
@@ -186,6 +218,7 @@ public class SenderHelper {
 				logger.info("opConnect local:{} remote:{}", localAddress, remoteAddress);
 
 				sk.interestOps(SelectionKey.OP_READ);
+				callback.connected(this);
 			} catch (IOException ioe) {
 				logger.error("Error finishing connection", ioe);
 				close();
@@ -194,7 +227,7 @@ public class SenderHelper {
 
 		@Override
 		public void opWrite(final SelectableChannel channel, long currentTimeNanos) {
-
+			opWriteCallback++;
 			try {
 				flush();
 
@@ -215,6 +248,7 @@ public class SenderHelper {
 					}
 				}
 				writeBuffer.put(message, offset, length);
+				messageSendCount++;
 				return true;
 			} catch (Exception e) {
 				logger.error("Error sending message", e);
@@ -236,22 +270,34 @@ public class SenderHelper {
 				close();
 			} else if (writeCount == remaining) {
 				writeBuffer.clear();
-				if (isBlocked) {
-					sk.interestOps(SelectionKey.OP_READ);
-					isBlocked = false;
+				if (isWriteBlocked) {
+					if (isReadBlocked) {
+						sk.interestOps(0);
+					} else {
+						sk.interestOps(SelectionKey.OP_READ);
+					}
+					isWriteBlocked = false;
 					callback.unblocked(this);
 				}
+				bytesWritten += writeCount;
 			} else {
+				// only wrote some data. block
 				writeBuffer.compact();
-				// blocked
-				if (!isBlocked) {
-					sk.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+				if (!isWriteBlocked) {
+					if (isReadBlocked) {
+						// wait.registerSelectableChannel(channel, callback)
+						sk.interestOps(SelectionKey.OP_WRITE);
+					} else {
+						sk.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+					}
 					blockStartAt = wait.currentTimeNanos;
-					isBlocked = true;
+					isWriteBlocked = true;
 					callback.blocked(this);
 				}
-
+				bytesWritten += writeCount;
 			}
+			flushCount++;
+
 			return bufferRemaining();
 		}
 
@@ -261,11 +307,11 @@ public class SenderHelper {
 		}
 
 		@Override
-		public long isBlocked() {
-			if (isBlocked) {
+		public long isWriteBlocked() {
+			if (isWriteBlocked) {
 				return wait.currentTimeNanos - blockStartAt;
 			} else {
-				return 0;
+				return -1;
 			}
 		}
 
@@ -324,17 +370,45 @@ public class SenderHelper {
 			return writeBuffer.remaining();
 		}
 
-		private int id;
-
 		@Override
 		public int getId() {
-			// TODO Auto-generated method stub
 			return id;
 		}
 
 		@Override
 		public void setId(int id) {
 			this.id = id;
+		}
+
+		@Override
+		public long isReadBlocked() {
+			return isReadBlocked ? 1 : -1;
+		}
+
+		@Override
+		public void blockRead() {
+			if (isReadBlocked) {
+				return;
+			}
+			isReadBlocked = true;
+			if (isWriteBlocked) {
+				sk.interestOps(SelectionKey.OP_WRITE);
+			} else {
+				sk.interestOps(0);
+			}
+		}
+
+		@Override
+		public void unblockRead() {
+			if (!isReadBlocked) {
+				return;
+			}
+			isReadBlocked = false;
+			if (isWriteBlocked) {
+				sk.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+			} else {
+				sk.interestOps(SelectionKey.OP_READ);
+			}
 		}
 
 	}
@@ -346,7 +420,8 @@ public class SenderHelper {
 	 *
 	 */
 	public interface SenderCallback {
-		public SenderCallin connected(final SenderCallin callin);
+		/** when connected */
+		public void connected(final SenderCallin callin);
 
 		public void blocked(final SenderCallin callin);
 
@@ -389,7 +464,14 @@ public class SenderHelper {
 		public int maxBuffer();
 
 		/** true if blocked, time when block started */
-		public long isBlocked();
+		public long isWriteBlocked();
+
+		/** true if blocked, time when block started */
+		public long isReadBlocked();
+
+		public void blockRead();
+
+		public void unblockRead();
 
 		public int getId();
 

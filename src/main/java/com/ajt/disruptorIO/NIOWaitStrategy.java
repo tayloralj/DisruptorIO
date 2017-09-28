@@ -175,6 +175,7 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 						break;
 
 					default:
+						throw new RuntimeException("Error unknown ready" + readyOps);
 					}
 
 				} else {
@@ -360,6 +361,7 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	public SelectionKey registerSelectableChannel(final SelectableChannel channel, final SelectorCallback callback)
 			throws ClosedChannelException {
 		final SelectionKey key = channel.register(selector, 0, callback);
+		int validOps = channel.validOps();
 		return key;
 	}
 
@@ -422,7 +424,6 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			return;
 		}
 		isClosed = true;
-
 
 		timerLatencyReport.callback.timerCallback(0, 0);
 

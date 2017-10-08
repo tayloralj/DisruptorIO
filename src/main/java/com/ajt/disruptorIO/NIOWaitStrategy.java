@@ -32,7 +32,7 @@ import com.lmax.disruptor.collections.Histogram;
  * @author alist
  *
  */
-class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
+public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	private final Logger logger = LoggerFactory.getLogger(NIOWaitStrategy.class);
 	final NIOClock clock;
 	final boolean timerStats;
@@ -247,7 +247,6 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 	public TimerHandler createTimer(final TimerCallback callback, final String timerName) {
 		final MyTimerHandler th = new MyTimerHandler(callback, timerName);
-		logger.debug("Created new timer:{}", timerName);
 		timerLatencyReport.addTimerHandler(th);
 
 		return th;
@@ -468,7 +467,7 @@ class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	 * this to convert the
 	 */
 
-	static NIOClock getDefaultClock() {
+	public static NIOClock getDefaultClock() {
 		return new NIOClock() {
 			private long nanoOffset = 0;
 			{

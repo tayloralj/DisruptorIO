@@ -17,19 +17,27 @@ import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.NIOWaitStrategy.SelectorCallback;
 
-public class SenderHelper {
-	protected final Logger logger = LoggerFactory.getLogger(SenderHelper.class);
+public class LogRecordSenderHelper implements ConnectionHelper {
+	protected final Logger logger = LoggerFactory.getLogger(LogRecordSenderHelper.class);
 	protected NIOWaitStrategy wait;
 	private static int count = 0;
 
-	public static final int DEFAULT_BUFFER = 64 * 1024;
 	public static boolean recordStats = false;
 
-	public SenderHelper(NIOWaitStrategy waiter) {
+	public LogRecordSenderHelper(NIOWaitStrategy waiter) {
 		this.wait = waiter;
 	}
 
-	public SenderCallin connectTo(final InetSocketAddress remote, final SenderCallback callback) throws IOException {
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see
+	 * com.ajt.disruptorIO.ConnectionHelper#connectTo(java.net.InetSocketAddress,
+	 * com.ajt.disruptorIO.SenderCallback)
+	 */
+	@Override
+	public ConnectionHelper.SenderCallin connectTo(final InetSocketAddress remote, final SenderCallback callback)
+			throws IOException {
 
 		final SocketChannel sc = SocketChannel.open();
 		sc.configureBlocking(false);
@@ -41,7 +49,15 @@ public class SenderHelper {
 
 	}
 
-	public SenderCallin bindTo(final InetSocketAddress local, SenderCallback callback) throws IOException {
+	/*
+	 * (non-Javadoc)
+	 * 
+	 * @see com.ajt.disruptorIO.ConnectionHelper#bindTo(java.net.InetSocketAddress,
+	 * com.ajt.disruptorIO.SenderCallback)
+	 */
+	@Override
+	public ConnectionHelper.SenderCallin bindTo(final InetSocketAddress local, SenderCallback callback)
+			throws IOException {
 		final ServerSocketChannel socketChannel = ServerSocketChannel.open();
 		socketChannel.configureBlocking(false);
 		socketChannel.bind(local, 0);
@@ -53,7 +69,7 @@ public class SenderHelper {
 
 	}
 
-	private class IOHandler implements SelectorCallback, SenderCallin {
+	private class IOHandler implements SelectorCallback, ConnectionHelper.SenderCallin {
 		private ServerSocketChannel serverSocketChannel = null;
 		private SocketChannel socketChannel = null;
 		private SelectionKey sk = null;
@@ -65,11 +81,12 @@ public class SenderHelper {
 		private final byte[] readBytes;
 		private final byte[] writeBytes;
 		private boolean isClosed = false;
-		private boolean isWriteBlocked = false;
-		private long blockStartAt = 0;
 		private final int counter;
 		private int id;
+		private boolean inReadWrite = false;
 		private boolean isReadBlocked = false;
+		private boolean isWriteBlocked = false;
+		private long writeBlockStartAt = 0;
 		// some basic stats
 		private long bytesWritten = 0;
 		private long bytesRead = 0;
@@ -78,7 +95,7 @@ public class SenderHelper {
 		private long messageSendCount = 0;
 		private long flushCount = 0;
 
-		public IOHandler(final ServerSocketChannel ssc, final SenderCallback callback)
+		private IOHandler(final ServerSocketChannel ssc, final SenderCallback callback)
 				throws IOException, ClosedChannelException {
 
 			this.serverSocketChannel = ssc;
@@ -101,7 +118,7 @@ public class SenderHelper {
 			}
 		}
 
-		public IOHandler(final SocketChannel sc, final SenderCallback callback) throws IOException {
+		private IOHandler(final SocketChannel sc, final SenderCallback callback) throws IOException {
 
 			this.socketChannel = sc;
 			this.callback = callback;
@@ -144,32 +161,6 @@ public class SenderHelper {
 
 		public int hashCode() {
 			return counter;
-		}
-
-		@Override
-		public void opRead(final SelectableChannel channel, final long currentTimeNanos) {
-			opReadCallback++;
-			try {
-				int callbackBytesRead = -1;
-				int readCounter = 0;
-				do {
-					callbackBytesRead = socketChannel.read(readBuffer);
-					if (callbackBytesRead == -1) {
-						close();
-						break;
-					}
-					if (callbackBytesRead == 0) {
-						break;
-					}
-					readBuffer.flip();
-					callback.readData(this, readBuffer);
-					readBuffer.clear();
-					bytesRead += callbackBytesRead;
-				} while (callbackBytesRead > 0 && readCounter-- > 0);
-			} catch (Exception e) {
-				logger.error("Error on read", e);
-				close();
-			}
 		}
 
 		@Override
@@ -217,8 +208,8 @@ public class SenderHelper {
 				localAddress = socketChannel.getLocalAddress();
 				logger.info("opConnect local:{} remote:{}", localAddress, remoteAddress);
 
-				sk.interestOps(SelectionKey.OP_READ);
 				callback.connected(this);
+				setKeyStatus();
 			} catch (IOException ioe) {
 				logger.error("Error finishing connection", ioe);
 				close();
@@ -228,28 +219,71 @@ public class SenderHelper {
 		@Override
 		public void opWrite(final SelectableChannel channel, long currentTimeNanos) {
 			opWriteCallback++;
+			inReadWrite = true;
 			try {
 				flush();
 
 			} catch (Exception e) {
+				inReadWrite = false;
 				logger.error("Error writing", e);
+				close();
+				return;
+			}
+			setKeyStatus();
+		}
+
+		@Override
+		public void opRead(final SelectableChannel channel, final long currentTimeNanos) {
+			opReadCallback++;
+			if (isReadBlocked) {
+				logger.warn("got read callback when read blocked " + this.toString());
+				// odd.
+				return;
+			}
+			inReadWrite = true;
+			try {
+				int callbackBytesRead = -1;
+				int maxReadCounter = 10;
+				do {
+					callbackBytesRead = socketChannel.read(readBuffer);
+					if (callbackBytesRead == -1) {
+						close();
+						inReadWrite = false;
+						return;
+					}
+					if (callbackBytesRead == 0) {
+						break;
+					}
+					readBuffer.flip();
+					callback.readData(this, readBuffer);
+					readBuffer.clear();
+					bytesRead += callbackBytesRead;
+				} while (callbackBytesRead > 0// no point if not reading data;
+						&& maxReadCounter-- > 0 //
+						&& !isReadBlocked // can be set in the callback
+				);
+				inReadWrite = false;
+				setKeyStatus();
+			} catch (Exception e) {
+				logger.error("Error on read", e);
 				close();
 			}
 		}
 
 		@Override
-		public boolean sendMessage(final byte[] message, final int offset, final int length)
+		public long sendMessage(final byte[] message, final int offset, final int length)
 				throws ClosedChannelException {
 			try {
+				long written = 0;
 				if (writeBuffer.remaining() < length) {
-					flush();
+					written = flush();
 					if (bufferRemaining() < length) {
-						return false;
+						return -1;
 					}
 				}
 				writeBuffer.put(message, offset, length);
 				messageSendCount++;
-				return true;
+				return written;
 			} catch (Exception e) {
 				logger.error("Error sending message", e);
 				close();
@@ -260,6 +294,7 @@ public class SenderHelper {
 
 		@Override
 		public long flush() throws IOException {
+			inReadWrite = true;
 			if (logger.isTraceEnabled()) {
 				logger.trace(" flush id:{} posn:{}", id, writeBuffer.position());
 			}
@@ -268,37 +303,56 @@ public class SenderHelper {
 			final int writeCount = socketChannel.write(writeBuffer);
 			if (writeCount == -1) {
 				close();
+				return -1;
 			} else if (writeCount == remaining) {
 				writeBuffer.clear();
 				if (isWriteBlocked) {
-					if (isReadBlocked) {
-						sk.interestOps(0);
-					} else {
-						sk.interestOps(SelectionKey.OP_READ);
-					}
 					isWriteBlocked = false;
-					callback.unblocked(this);
+					callback.writeUnblocked(this);
 				}
 				bytesWritten += writeCount;
 			} else {
 				// only wrote some data. block
 				writeBuffer.compact();
 				if (!isWriteBlocked) {
-					if (isReadBlocked) {
-						// wait.registerSelectableChannel(channel, callback)
-						sk.interestOps(SelectionKey.OP_WRITE);
-					} else {
-						sk.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-					}
-					blockStartAt = wait.currentTimeNanos;
+					writeBlockStartAt = wait.currentTimeNanos;
 					isWriteBlocked = true;
-					callback.blocked(this);
+					callback.writeNowBlocked(this);
 				}
 				bytesWritten += writeCount;
 			}
 			flushCount++;
+			inReadWrite = false;
 
+			setKeyStatus();
 			return bufferRemaining();
+		}
+
+		private void setKeyStatus() {
+			final int currentOps = sk.interestOps();
+			final int futureOps;
+			if (isWriteBlocked) {
+				if (isReadBlocked) {
+					futureOps = SelectionKey.OP_WRITE;
+				} else {
+					futureOps = SelectionKey.OP_WRITE + SelectionKey.OP_READ;
+				}
+			} else {
+				if (isReadBlocked) {
+					// !writeBLocked + readBlocked
+					futureOps = 0;
+
+				} else {
+					// !writeBloced + !readBlocked
+					futureOps = SelectionKey.OP_READ;
+				}
+			}
+			if (currentOps == futureOps) {
+
+			} else {
+				sk.interestOps(futureOps);
+			}
+
 		}
 
 		@Override
@@ -309,7 +363,7 @@ public class SenderHelper {
 		@Override
 		public long isWriteBlocked() {
 			if (isWriteBlocked) {
-				return wait.currentTimeNanos - blockStartAt;
+				return wait.currentTimeNanos - writeBlockStartAt;
 			} else {
 				return -1;
 			}
@@ -391,11 +445,10 @@ public class SenderHelper {
 				return;
 			}
 			isReadBlocked = true;
-			if (isWriteBlocked) {
-				sk.interestOps(SelectionKey.OP_WRITE);
-			} else {
-				sk.interestOps(0);
+			if (inReadWrite) {
+				return;
 			}
+			setKeyStatus();
 		}
 
 		@Override
@@ -404,78 +457,12 @@ public class SenderHelper {
 				return;
 			}
 			isReadBlocked = false;
-			if (isWriteBlocked) {
-				sk.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-			} else {
-				sk.interestOps(SelectionKey.OP_READ);
+			if (inReadWrite) {
+				return;
 			}
+			setKeyStatus();
 		}
 
-	}
-
-	/**
-	 * callback interface for inform about status of connections
-	 * 
-	 * @author ajt
-	 *
-	 */
-	public interface SenderCallback {
-		/** when connected */
-		public void connected(final SenderCallin callin);
-
-		public void blocked(final SenderCallin callin);
-
-		public void unblocked(final SenderCallin callin);
-
-		public void readData(final SenderCallin callin, final ByteBuffer buffer);
-
-		public void closed(final SenderCallin callin);
-
-	}
-
-	/**
-	 * client calls this, gets as returned on connection
-	 * 
-	 * @author ajt
-	 *
-	 */
-	public interface SenderCallin extends AutoCloseable {
-
-		public SocketAddress getRemoteAddress();
-
-		public SocketAddress getLocalAddress();
-
-		/**
-		 * return true if sent or buffered, will return false if can not gtee sending at
-		 * this point
-		 */
-		public boolean sendMessage(final byte[] message, final int offset, final int length)
-				throws ClosedChannelException;
-
-		/** flush as much as possible to socket */
-		public long flush() throws IOException;
-
-		/** flush should be called if >0 */
-		public int byteInBuffer();
-
-		/** space available before will block */
-		public int bufferRemaining();
-
-		public int maxBuffer();
-
-		/** true if blocked, time when block started */
-		public long isWriteBlocked();
-
-		/** true if blocked, time when block started */
-		public long isReadBlocked();
-
-		public void blockRead();
-
-		public void unblockRead();
-
-		public int getId();
-
-		public void setId(int id);
 	}
 
 }

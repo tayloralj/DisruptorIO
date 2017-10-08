@@ -1,0 +1,261 @@
+package com.ajt.disruptorIO.helper;
+
+import static org.junit.Assert.assertThat;
+
+import java.net.SocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.concurrent.TimeUnit;
+
+import org.hamcrest.Matchers;
+import org.junit.Assert;
+
+import com.ajt.disruptorIO.ConnectionHelper;
+import com.ajt.disruptorIO.NIOWaitStrategy;
+import com.ajt.disruptorIO.TestEvent;
+import com.ajt.disruptorIO.ConnectionHelper.SenderCallback;
+import com.ajt.disruptorIO.NIOWaitStrategy.TimerCallback;
+import com.ajt.disruptorIO.NIOWaitStrategy.TimerHandler;
+import com.lmax.disruptor.collections.Histogram;
+
+class ClientConnectionHelper implements SenderCallback {
+	/**
+	 * 
+	 */
+	private final NIOWaitSelector2NIO2.TestEventClient testEventClient;
+	boolean isClosed = false;
+	long readShouldBeAtLeast = 0;
+	long writeShouldBeAtLeast = 0;
+	long bytesRead = 0;
+	long bytesReadCallback = 0;
+	long messageReadCount = 0;
+	long rttReadCount = 0;
+	long bytesReadCount = 0;
+	long totalWriteSocket = 0;
+	private long writeSignalCount = 0;
+	private long writeCount = 0;
+
+	long recvMsgCount = 0;
+
+	final byte[] readBytes;
+	final byte[] writeBytes;
+	long messageCounter = 0;
+	final ByteBuffer writeBuffer;
+	final ByteBuffer readBuffer;
+	final TimerHandler timerHandler;
+	final TimerSenderCallback callback;
+	long startTimeNano = 0;
+	boolean blocked = false;
+	long slowTimer = 100 * 1000000;
+	long fastTimer = 500;
+	final int id;
+	final Histogram propHisto = TestEvent.getHisto();
+	final Histogram rttHisto = TestEvent.getHisto();
+	ConnectionHelper.SenderCallin callin;
+	private long startBlockAt = 0;
+
+	public ClientConnectionHelper(NIOWaitSelector2NIO2.TestEventClient testEventClient, int id, SocketAddress sa,
+			NIOWaitStrategy nioWait) {
+		this.testEventClient = testEventClient;
+		this.id = id;
+
+		writeBytes = new byte[256];
+		for (int a = 0; a < writeBytes.length; a++) {
+			writeBytes[a] = (byte) a;
+		}
+		writeBuffer = ByteBuffer.wrap(writeBytes);
+		writeBuffer.order(ByteOrder.LITTLE_ENDIAN);
+		readBytes = new byte[1024 * 1024];
+		readBuffer = ByteBuffer.wrap(readBytes);
+		readBuffer.order(ByteOrder.LITTLE_ENDIAN);
+		callback = new TimerSenderCallback();
+
+		timerHandler = nioWait.createTimer(callback, "NIO connection-" + id);
+
+	}
+
+	@Override
+	public void connected(final ConnectionHelper.SenderCallin callin) {
+
+		this.callin = callin;
+		// start sending own data to get echo'd back
+		timerHandler.fireIn(0);
+		startTimeNano = timerHandler.currentNanoTime();
+		this.testEventClient.logger.info("opConnect Complete :" + callin);
+
+	}
+
+	// flow controol
+
+	@Override
+	public void writeNowBlocked(final ConnectionHelper.SenderCallin callin) {
+		this.testEventClient.logger.info(" client blocked write callin:{}", callin.getLocalAddress());
+		blocked = true;
+		startBlockAt = System.nanoTime();
+	}
+
+	@Override
+	public void writeUnblocked(final ConnectionHelper.SenderCallin callin) {
+		this.testEventClient.logger.info("client unblocked write for(us):{} callin:{}",
+				TimeUnit.NANOSECONDS.toMicros(System.nanoTime() - startBlockAt), callin.getLocalAddress());
+		blocked = false;
+	}
+
+	@Override
+	public void readData(final ConnectionHelper.SenderCallin callin, final ByteBuffer buffer) {
+		bytesReadCount++;
+		bytesRead += buffer.remaining();
+		readBuffer.put(buffer);
+		int bufferPosition = readBuffer.position(); // point in buffer of last read byte
+		int startPosition = 0;
+
+		readBuffer.position(startPosition);
+		readBuffer.limit(bufferPosition);
+		while (true) {
+			if (readBuffer.limit() - readBuffer.position() < 8) {
+				if (this.testEventClient.logger.isTraceEnabled()) {
+					this.testEventClient.logger.trace("SHort Buff COMPACT :{} :{}", readBuffer.limit(),
+							readBuffer.position());
+				}
+				readBuffer.compact();
+				break;
+			}
+			final int length = TestEvent.getIntFromArray(readBytes, readBuffer.position() + TestEvent.Offsets.length);
+			assertThat(" posn:" + readBuffer.position() + " lim:" + readBuffer.limit(), //
+					length, Matchers.greaterThan(16));
+			//
+			if (startPosition + length <= readBuffer.limit()) {
+				// got a full message
+				final int type = TestEvent.getIntFromArray(readBytes, readBuffer.position() + 4);
+				switch (type) {
+				case TestEvent.MessageType.clientRequestMessage:
+					this.testEventClient.logger.debug("unknown type");
+					break;
+				case TestEvent.MessageType.dataFromServerEvent: {
+					final long sendTime = TestEvent.getLongFromArray(readBytes,
+							readBuffer.position() + TestEvent.Offsets.time);
+					final long nowNanoTime = System.nanoTime();
+					propHisto.addObservation(nowNanoTime - sendTime);
+					// occasional logging
+					if ((messageReadCount & ((256 * 1024) - 1)) == 0) {
+						this.testEventClient.logger.info("id:{} Prop Histo:{} {}", id, propHisto.getCount(),
+								TestEvent.toStringHisto(propHisto));
+
+						this.testEventClient.logger.debug(
+								"Took to recv:{} len:{} posn:{} lim:{} readCount:{} bytesRead:{} bytesReadCount:{}",
+								(nowNanoTime - sendTime), length, startPosition, readBuffer.limit(), bytesRead,
+								bytesRead, bytesReadCount);
+
+					}
+					messageReadCount++;
+				}
+					break;
+				case TestEvent.MessageType.serverResponseMessage: {
+					// logger.debug("ServerRTTMessage");
+					final long sendTime = TestEvent.getLongFromArray(readBytes,
+							readBuffer.position() + TestEvent.Offsets.time);
+					final long nowNanoTime = System.nanoTime();
+					rttHisto.addObservation(nowNanoTime - sendTime);
+					rttReadCount++;
+				}
+					break;
+				default:
+					Assert.fail("Error unknown message type:" + type + " len:" + length);
+				}
+				startPosition += length;
+				if (startPosition == readBuffer.limit()) {
+					readBuffer.clear();
+					break;
+				} else {
+					assertThat(startPosition, Matchers.lessThan(readBuffer.limit()));
+					readBuffer.position(startPosition);
+				}
+			} else {
+				if (this.testEventClient.logger.isTraceEnabled()) {
+					this.testEventClient.logger.info("Client COMPACT posn:{} lim:{}", readBuffer.position(),
+							readBuffer.limit());
+				}
+				readBuffer.compact();
+				break;
+			}
+		}
+
+	}
+
+	@Override
+	public void closed(final ConnectionHelper.SenderCallin callin) {
+		this.testEventClient.logger.info("Close from callin:{}", callin);
+		close();
+
+	}
+
+	public void close() {
+		if (isClosed) {
+			return;
+		}
+		isClosed = true;
+		timerHandler.cancelTimer();
+		this.testEventClient.logger.info(
+				"\tClientClosing id:{} \n"
+						+ "\n\tREAD_CLIENT:bytesRead:{} messageSentCounter:{} serverMessageRead:{} serverRttRead:{}"
+						+ "\n\tWRITE_CLIENT: totalWrite:{} writeSignalCount:{} writeCount:{}" //
+						+ "\n\t Propogate time Histo:{} {}"//
+						+ "\n\t RTT time Histo:{} {}",
+				id, bytesRead, messageCounter, messageReadCount, rttReadCount, //
+				totalWriteSocket, writeSignalCount, writeCount, propHisto.getCount(), //
+				TestEvent.toStringHisto(propHisto), rttHisto.getCount(), TestEvent.toStringHisto(rttHisto));
+		propHisto.clear();
+		rttHisto.clear();
+	}
+
+	/** sent out messages to the client periodically */
+	private class TimerSenderCallback implements TimerCallback {
+
+		@Override
+		public void timerCallback(final long dueAt, final long currentNanoTime) {
+			try {
+				if (blocked) {
+					timerHandler.fireIn(slowTimer);
+					return;
+				}
+
+				final long elapsed = currentNanoTime - startTimeNano;
+				boolean somethingWritten = false;
+				while (elapsed * ClientConnectionHelper.this.testEventClient.writeRatePerSecond > totalWriteSocket
+						* 1000000000L && !blocked) {
+
+					TestEvent.putIntToArray(writeBytes, TestEvent.Offsets.type,
+							TestEvent.MessageType.clientRequestMessage);
+					TestEvent.putIntToArray(writeBytes, TestEvent.Offsets.length, writeBytes.length);
+					TestEvent.putLongToArray(writeBytes, TestEvent.Offsets.time, System.nanoTime());
+					TestEvent.putLongToArray(writeBytes, TestEvent.Offsets.seqnum, messageCounter++);
+
+					writeBuffer.position(0);
+					writeBuffer.limit(writeBytes.length);
+					final long couldSend = callin.sendMessage(writeBytes, 0, writeBytes.length);
+					if (couldSend == -1) {
+						messageCounter--;
+						ClientConnectionHelper.this.testEventClient.logger
+								.debug("got blocked trying to write, buffer full :-(");
+						break;
+					}
+					somethingWritten = true;
+					totalWriteSocket += couldSend;
+					writeCount++;
+
+				}
+				if (somethingWritten) {
+					callin.flush();
+					writeSignalCount++;
+				}
+				timerHandler.fireIn(fastTimer);
+
+			} catch (final Exception e) {
+				ClientConnectionHelper.this.testEventClient.logger.error("Errro in callback", e);
+				close();
+			}
+		}
+
+	}
+
+}

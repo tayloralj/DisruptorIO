@@ -4,29 +4,22 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import com.lmax.disruptor.EventFactory;
+import com.lmax.disruptor.collections.Histogram;
 
-final class TestEvent {
-	enum EventType {
+public final class TestEvent {
+	public enum EventType {
 		data, newServer, close, UNKNOWN;
 	}
 
-	interface MessageType {
-		int dataEvent = 1;
-		int clientMessage = 2;
-		int serverMessage = 3;
+	public interface MessageType {
+		int dataFromServerEvent = 1;
+		int clientRequestMessage = 2;
+		int serverResponseMessage = 3;
 
 	}
 
-	TestEvent.EventType type = EventType.UNKNOWN;
-	byte[] data = null;
-	int targetID = 0;
-	final long seqNum;
-	long nanoSendTime = 0;
-	private static long counter = 0;
-	private final ByteBuffer writeBuffer;
-	private final ByteBuffer readBuffer;
-
-	interface Offsets {
+	/** point into a message where data is stored */
+	public interface Offsets {
 		int length = 0;
 		int type = 4;
 		int seqnum = 8;
@@ -35,7 +28,35 @@ final class TestEvent {
 		int responsTime = 32;
 	}
 
-	static long getLongFromArray(final byte[] data, final int offset) {
+	public TestEvent.EventType type = EventType.UNKNOWN;
+	public byte[] data = null;
+	public int targetID = 0;
+	public final long seqNum;
+	public long nanoSendTime = 0;
+	private static long counter = 0;
+	private final ByteBuffer writeBuffer;
+	private final ByteBuffer readBuffer;
+
+	public static Histogram getHisto() {
+		Histogram h = new Histogram(new long[] { 100, 200, 400, 1000, 4000, 8000, 20000, 50000, 100000, 200000, 500000,
+				2000000, 5000000, 5000000 * 4, 5000000 * 10, 5000000 * 20, 5000000 * 50 });
+
+		return h;
+	}
+
+	public static String toStringHisto(Histogram h) {
+		final StringBuilder sb = new StringBuilder();
+		sb.append("Mean: " + h.getMean());
+		final int size = h.getSize();
+		for (int a = 0; a < size; a++) {
+			if (h.getCountAt(a) > 0) {
+				sb.append(" ").append(h.getUpperBoundAt(a)).append(":").append(h.getCountAt(a));
+			}
+		}
+		return sb.toString();
+	}
+
+	public static long getLongFromArray(final byte[] data, final int offset) {
 		return ((long) (data[offset + 0]) << 56) + //
 				(((long) data[offset + 1] & 0xFF) << 48) + //
 				(((long) data[offset + 2] & 0xFF) << 40) + //
@@ -46,14 +67,14 @@ final class TestEvent {
 				(((long) data[offset + 7] & 0xFF));
 	}
 
-	static int getIntFromArray(final byte[] data, final int offset) {
+	public static int getIntFromArray(final byte[] data, final int offset) {
 		return ((int) (data[offset + 0]) << 24) + //
 				(((int) data[offset + 1] & 0xFF) << 16) + //
 				(((int) data[offset + 2] & 0xFF) << 8) + //
 				(((int) data[offset + 3] & 0xFF));
 	}
 
-	static void putLongToArray(final byte[] data, final int offset, final long value) {
+	public static void putLongToArray(final byte[] data, final int offset, final long value) {
 		data[offset + 0] = (byte) ((value >> 56) & 0xFF);
 		data[offset + 1] = (byte) ((value >> 48) & 0xFF);
 		data[offset + 2] = (byte) ((value >> 40) & 0xFF);
@@ -64,7 +85,7 @@ final class TestEvent {
 		data[offset + 7] = (byte) ((value) & 0xFF);
 	}
 
-	static void putIntToArray(final byte[] data, final int offset, final int value) {
+	public static void putIntToArray(final byte[] data, final int offset, final int value) {
 		data[offset + 0] = (byte) ((value >> 24) & 0xFF);
 		data[offset + 1] = (byte) ((value >> 16) & 0xFF);
 		data[offset + 2] = (byte) ((value >> 8) & 0xFF);

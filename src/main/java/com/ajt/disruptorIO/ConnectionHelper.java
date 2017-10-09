@@ -8,49 +8,70 @@ import java.nio.channels.ClosedChannelException;
 
 public interface ConnectionHelper {
 
-	int DEFAULT_BUFFER = 64 * 1024;
+	public int DEFAULT_BUFFER = 64 * 1024;
 
-	ConnectionHelper.SenderCallin connectTo(InetSocketAddress remote, SenderCallback callback) throws IOException;
-
-	ConnectionHelper.SenderCallin bindTo(InetSocketAddress local, SenderCallback callback) throws IOException;
+	/** connect to a remote address, single callback when connected */
+	public ConnectionHelper.SenderCallin connectTo(final InetSocketAddress remote, final SenderCallback callback)
+			throws IOException;
 
 	/**
-	 * client calls this, gets as returned on connection
+	 * bind to a local address, callback will be made for each new connection
+	 * 
+	 * @param local
+	 * @param callback
+	 * @return
+	 * @throws IOException
+	 */
+	ConnectionHelper.SenderCallin bindTo(final InetSocketAddress local, final SenderCallback callback)
+			throws IOException;
+
+	/**
+	 * client calls this, gets as returned on connection api to control a socket
 	 * 
 	 * @author ajt
 	 *
 	 */
-	interface SenderCallin extends AutoCloseable {
+	public interface SenderCallin extends AutoCloseable {
 
 		public SocketAddress getRemoteAddress();
 
 		public SocketAddress getLocalAddress();
 
 		/**
-		 * return true if sent or buffered, will return false if can not gtee sending at
-		 * this point
+		 * returns >0 if data was acceped and flushed returns 0 if nothing written -
+		 * yet, but data accepted returns -1 if the data could not be buffered throws
+		 * exception if the channel is closed
 		 */
-		public long sendMessage(final byte[] message, final int offset, final int length)
-				throws ClosedChannelException;
+		public long sendMessage(final byte[] message, final int offset, final int length) throws ClosedChannelException;
 
-		/** flush as much as possible to socket */
+		/**
+		 * flush as much as possible to socket, can be called if no data to send. this
+		 * should be called by the client, eg at the end of a batch of data
+		 */
 		public long flush() throws IOException;
 
 		/** flush should be called if >0 */
-		public int byteInBuffer();
+		public int bytesInBuffer();
 
 		/** space available before will block */
 		public int bufferRemaining();
 
+		/** max amount of data which can be in the buffer at once */
 		public int maxBuffer();
 
-		/** true if blocked, time when block started */
+		/**
+		 * >0 if blocked, time will be the nanoseconds when the time when block started
+		 */
 		public long isWriteBlocked();
 
 		/** true if blocked, time when block started */
 		public long isReadBlocked();
 
-		/** suspend inbound reading of data until unblock called */
+		/**
+		 * suspend inbound reading of data until unblock called. is intended for use by
+		 * clients who need to suspend arrival of data until some processing is
+		 * completed
+		 */
 		public void blockRead();
 
 		/** will start delivering data from the socket - if there is any */
@@ -59,14 +80,19 @@ public interface ConnectionHelper {
 		/** return the id you set */
 		public int getId();
 
-		public void setId(int id);
+		/** handle way to indenfify */
+		public void setId(final int id);
 
 		/** please would you close this connection */
 		public void close();
 	}
 
+	/** callbacks to be recieved by the client at any time */
 	public interface SenderCallback {
-		/** when connected */
+		/**
+		 * when connected to endpoint, either as server socket or connection to remote
+		 * endpoint
+		 */
 		public void connected(final ConnectionHelper.SenderCallin callin);
 
 		/** got a bunch of data in the send buffer which could not be sent yet */
@@ -75,10 +101,16 @@ public interface ConnectionHelper {
 		/** all data now flushed from the buffer. free to continue */
 		public void writeUnblocked(final ConnectionHelper.SenderCallin callin);
 
-		/** some data was read from the remote connectin - here it is */
+		/**
+		 * some data was read from the remote connectin - here it is. once callback is
+		 * completed the buffer will be reused. copy everything out of the buffer
+		 */
 		public void readData(final ConnectionHelper.SenderCallin callin, final ByteBuffer buffer);
 
-		/** the connection is now closed */
+		/**
+		 * the connection is now closed. may be triggered by anything wich closed the
+		 * socket
+		 */
 		public void closed(final ConnectionHelper.SenderCallin callin);
 
 	}

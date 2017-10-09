@@ -356,7 +356,7 @@ public class LogRecordSenderHelper implements ConnectionHelper {
 		}
 
 		@Override
-		public int byteInBuffer() {
+		public int bytesInBuffer() {
 			return writeBuffer.position();
 		}
 

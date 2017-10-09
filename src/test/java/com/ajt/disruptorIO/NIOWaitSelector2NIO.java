@@ -273,14 +273,15 @@ public class NIOWaitSelector2NIO {
 
 			}
 			logger.info("Finished sending");
-			final long endTime = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(10);
+			final long endTime = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1000);
 			while (System.nanoTime() < endTime) {
 				if (handlers[0].counter.get() == toSend) {
 					logger.info("completed :{}", toSend);
 					break;
 				}
 			}
-			assertThat(handlers[0].counter.get(), Matchers.is(toSend));
+			assertThat("Message count did not all get delivered by disruptor to client, slow or blocked client ? ",
+					handlers[0].counter.get(), Matchers.is(toSend));
 			nioWaitStrategyClient.getScheduledExecutor().execute(new Runnable() {
 
 				@Override
@@ -871,7 +872,7 @@ public class NIOWaitSelector2NIO {
 				 * @return
 				 */
 				boolean flush() throws IOException {
-				//	logger.info("Server flush");
+					// logger.info("Server flush");
 					if (currentlyBlocked) {
 						return false;
 					}

@@ -215,7 +215,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 
 		public void flush() throws IOException {
 			try {
-				if (serverCallin.byteInBuffer() > 0) {
+				if (serverCallin.bytesInBuffer() > 0) {
 					final long bytesWritten = serverCallin.flush();
 					if (bytesWritten > 0) {
 						totalWriteSocket += bytesWritten;

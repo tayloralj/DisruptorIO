@@ -21,7 +21,6 @@ import com.ajt.disruptorIO.TCPSenderHelper;
 import com.ajt.disruptorIO.TestEvent;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.ExceptionHandler;
-import com.lmax.disruptor.InsufficientCapacityException;
 import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
@@ -204,14 +203,15 @@ public class NIOWaitSelector2NIO2 {
 
 			}
 			logger.info("Finished sending");
-			final long endTime = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(10);
+			final long endTime = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1000);
 			while (System.nanoTime() < endTime) {
 				if (handlers[0].counter.get() == toSend) {
 					logger.info("completed :{}", toSend);
 					break;
 				}
 			}
-			assertThat(handlers[0].counter.get(), Matchers.is(toSend));
+			assertThat("Message count did not all get delivered by disruptor to client, slow or blocked client ? ",
+					handlers[0].counter.get(), Matchers.is(toSend));
 			nioWaitStrategyClient.getScheduledExecutor().execute(() -> {
 				logger.info("Closing client");
 				tc.close();
@@ -308,7 +308,7 @@ public class NIOWaitSelector2NIO2 {
 	@Test
 	public void testServerConnectionFull() throws Exception {
 		final long toSend = 20_000_000L;
-		final long messageratePerSecond = 200000_000L;
+		final long messageratePerSecond = 200_000_000L;
 		final long readRatePerSecond = 1_000000L;
 		final long writeRatePerSecond = 1_000000L;
 		final int clientCount = 2;
@@ -325,6 +325,58 @@ public class NIOWaitSelector2NIO2 {
 		final long readRatePerSecond = 1_000_000L;
 		final long writeRatePerSecond = 1_000_000L;
 		final int clientCount = 2;
+		final boolean lossy = true;
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		disruptorServer.handleEventsWith(handlers);
+		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
+	}
+
+	@Test
+	public void testServerConnection10Full() throws Exception {
+		final long toSend = 10_000_000L;
+		final long messageratePerSecond = 500_000L;
+		final long readRatePerSecond = 1_000000L;
+		final long writeRatePerSecond = 1_000000L;
+		final int clientCount = 2;
+		final boolean lossy = false;
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		disruptorServer.handleEventsWith(handlers);
+		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
+	}
+
+	@Test
+	public void testServerConnection10Lossy() throws Exception {
+		final long toSend = 10_000_000L;
+		final long messageratePerSecond = 500_000L;
+		final long readRatePerSecond = 1_000_000L;
+		final long writeRatePerSecond = 1_000_000L;
+		final int clientCount = 2;
+		final boolean lossy = true;
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		disruptorServer.handleEventsWith(handlers);
+		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
+	}
+
+	@Test
+	public void testServerConnection10_20Full() throws Exception {
+		final long toSend = 10_000_000L;
+		final long messageratePerSecond = 500_000L;
+		final long readRatePerSecond = 1_000000L;
+		final long writeRatePerSecond = 1_000000L;
+		final int clientCount = 20;
+		final boolean lossy = false;
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		disruptorServer.handleEventsWith(handlers);
+		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
+	}
+
+	@Test
+	public void testServerConnection10_20Lossy() throws Exception {
+		final long toSend = 10_000_000L;
+		final long messageratePerSecond = 500_000L;
+		final long readRatePerSecond = 1_000_000L;
+		final long writeRatePerSecond = 1_000_000L;
+		final int clientCount = 20;
 		final boolean lossy = true;
 		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
 		disruptorServer.handleEventsWith(handlers);

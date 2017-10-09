@@ -372,7 +372,7 @@ public class TCPSenderHelper implements ConnectionHelper {
 		}
 
 		@Override
-		public int byteInBuffer() {
+		public int bytesInBuffer() {
 			return writeBuffer.position();
 		}
 
@@ -394,7 +394,7 @@ public class TCPSenderHelper implements ConnectionHelper {
 				return;
 			}
 			isClosed = true;
-			if (byteInBuffer() > 0) {
+			if (bytesInBuffer() > 0) {
 				try {
 					flush();
 				} catch (Exception e) {

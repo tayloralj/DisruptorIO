@@ -169,7 +169,7 @@ public class NIOWaitSelector2NIO2 {
 
 					try {
 						if (lossy) {
-							sequenceNum = rb.tryNext(1);
+							sequenceNum = rb.next(1);
 						} else {
 							sequenceNum = rb.next(1);
 						}
@@ -184,7 +184,7 @@ public class NIOWaitSelector2NIO2 {
 						te.nanoSendTime = System.nanoTime();
 						rb.publish(sequenceNum);
 						actualMessageSendCount++;
-					} catch (InsufficientCapacityException ice) {
+					} catch (Exception ice) {
 						// land here if a lossy client
 					} finally {
 						// move onto next client

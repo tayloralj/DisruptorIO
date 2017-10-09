@@ -292,7 +292,7 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 		for (int a = 0; a < toRunCount; a++) {
 			assertThat(" counter:" + a, runList.get(a).hasRun.get(), is(true));
 			assertThat(list.get(a).isDone(), is(true));
-			assertThat(list.get(a).isCancelled(), is(false));
+			assertThat("" + list.get(a), list.get(a).isCancelled(), is(false));
 			assertThat(" counter:" + a, list.get(a).get().get(), is(true));
 		}
 

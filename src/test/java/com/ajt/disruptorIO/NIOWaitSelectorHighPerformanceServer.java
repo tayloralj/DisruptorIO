@@ -1,3 +1,13 @@
+/*******************************************************************************
+ * Copyright (c) 2017 IBM Corporation and others.
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ *
+ * Contributors:
+ *     IBM Corporation - initial API and implementation
+ *******************************************************************************/
 package com.ajt.disruptorIO;
 
 import static org.hamcrest.CoreMatchers.is;
@@ -140,8 +150,7 @@ public class NIOWaitSelectorHighPerformanceServer {
 
 			final RingBuffer<TestEvent> rb = disruptor.getRingBuffer();
 			socketChannel.configureBlocking(false);
-			SocketAddress sa = new InetSocketAddress("192.168.1.76", 9999);
-			socketChannel.bind(sa, 0);
+			socketChannel.bind(null, 0);
 
 			// pass to the disruptor thread.
 			nioWaitStrategy.getScheduledExecutor().execute(new Runnable() {

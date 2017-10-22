@@ -1,3 +1,13 @@
+/*******************************************************************************
+ * Copyright (c) 2017 IBM Corporation and others.
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ *
+ * Contributors:
+ *     IBM Corporation - initial API and implementation
+ *******************************************************************************/
 package com.ajt.disruptorIO;
 
 import java.io.IOException;
@@ -104,7 +114,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	}
 
 	public ScheduledExecutorService getScheduledExecutor() {
-		return strategyExecutor.executorService;
+		return strategyExecutor.getExecutorService();
 	}
 
 	/**
@@ -360,7 +370,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	public SelectionKey registerSelectableChannel(final SelectableChannel channel, final SelectorCallback callback)
 			throws ClosedChannelException {
 		final SelectionKey key = channel.register(selector, 0, callback);
-		int validOps = channel.validOps();
+		final int validOps = channel.validOps();
 		return key;
 	}
 
@@ -416,7 +426,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	}
 
 	@Override
-	public void close() throws Exception {
+	public void close() {
 		logger.info("Closing selector timerDepth:{}", timerHeap.size());
 		if (isClosed) {
 			logger.info("Already closed");

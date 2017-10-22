@@ -1,3 +1,13 @@
+/*******************************************************************************
+ * Copyright (c) 2017 IBM Corporation and others.
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ *
+ * Contributors:
+ *     IBM Corporation - initial API and implementation
+ *******************************************************************************/
 package com.ajt.disruptorIO.helper;
 
 import static org.junit.Assert.assertThat;
@@ -8,8 +18,6 @@ import java.net.SocketAddress;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.LinkedList;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.hamcrest.Matchers;
@@ -18,10 +26,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.ConnectionHelper;
+import com.ajt.disruptorIO.ConnectionHelper.SenderCallback;
 import com.ajt.disruptorIO.NIOWaitStrategy;
 import com.ajt.disruptorIO.TCPSenderHelper;
 import com.ajt.disruptorIO.TestEvent;
-import com.ajt.disruptorIO.ConnectionHelper.SenderCallback;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.collections.Histogram;
 
@@ -115,6 +123,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 			for (int a = 0; a < ecc.length; a++) {
 				if (ecc[a] == null) {
 
+					@SuppressWarnings("resource")
 					final ServerConnectionHelper.EstablishedServerConnectionCallback escc = new EstablishedServerConnectionCallback(
 							callin, a, coalsce);
 					callin.setId(a);

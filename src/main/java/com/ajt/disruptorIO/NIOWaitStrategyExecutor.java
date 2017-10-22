@@ -1,5 +1,16 @@
+/*******************************************************************************
+ * Copyright (c) 2017 IBM Corporation and others.
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ *
+ * Contributors:
+ *     IBM Corporation - initial API and implementation
+ *******************************************************************************/
 package com.ajt.disruptorIO;
 
+import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
@@ -25,19 +36,20 @@ import com.ajt.disruptorIO.NIOWaitStrategy.TimerHandler;
  * is used to schedule tasks via the executor api onto the waitstrategy thread
  * via a timer
  */
-class NIOWaitStrategyExecutor {
+class NIOWaitStrategyExecutor implements Closeable {
 
 	private final Logger logger = LoggerFactory.getLogger(NIOWaitStrategyExecutor.class);
-	final TimerHandler timerHandler;
-	final StrategyExecutorTimerCallback callback;
-	final TimerExecutorService executorService;
-	final long timerCheckInterval = 50_000L;
-	final long timerBusyInterval = 5_000L;
-	final ConcurrentLinkedQueue<TimerScheduledFuture<?>> queue;
-	final ArrayList<CallableDelayedTask> delayedTaskTimerCache;
-	volatile boolean isShutdown = false;
-	volatile long mostRecentTime = 0;
-	final NIOWaitStrategy wait;
+	private final TimerHandler timerHandler;
+	private final StrategyExecutorTimerCallback callback;
+	private final TimerExecutorService executorService;
+	private final long timerCheckInterval = 50_000L;
+	private final long timerBusyInterval = 5_000L;
+	private final ConcurrentLinkedQueue<TimerScheduledFuture<?>> queue;
+	private final ArrayList<CallableDelayedTask> delayedTaskTimerCache;
+	private volatile boolean isShutdown = false;
+	private volatile long mostRecentTime = 0;
+	private final NIOWaitStrategy wait;
+	private static int counter = 0;
 
 	public NIOWaitStrategyExecutor(NIOWaitStrategy waiter) {
 		wait = waiter;
@@ -55,7 +67,7 @@ class NIOWaitStrategyExecutor {
 		logger.info("Created pollInterval:{} busyInterval:{}", timerCheckInterval, timerBusyInterval);
 	}
 
-	void close() {
+	public void close() {
 		logger.info("Exector Close unscheduled Jobs:{}", queue.size());
 		int maxDump = 256; // protection
 		while (queue.size() > 0 && maxDump-- > 0) {
@@ -65,11 +77,13 @@ class NIOWaitStrategyExecutor {
 		isShutdown = true;
 	}
 
-	static int counter = 0;
+	ScheduledExecutorService getExecutorService() {
+		return executorService;
+	}
 
-	class CallableDelayedTask implements TimerCallback {
-		final TimerHandler th;
-		TimerScheduledFuture<?> callable;
+	private class CallableDelayedTask implements TimerCallback {
+		private final TimerHandler th;
+		private TimerScheduledFuture<?> callable;
 
 		public CallableDelayedTask() {
 			th = wait.createTimer(this, "DelayedTask :" + (counter++));
@@ -79,8 +93,11 @@ class NIOWaitStrategyExecutor {
 		public void timerCallback(final long dueAt, final long currentNanoTime) {
 			mostRecentTime = currentNanoTime;
 
-			if (callable == null)
+			if (callable == null) {
 				logger.error("Error callable was null " + dueAt, currentNanoTime);
+				return;
+			}
+
 			if (callable.isCancelled()) {
 				return;
 			}
@@ -158,7 +175,7 @@ class NIOWaitStrategyExecutor {
 
 	}
 
-	class TimerExecutorService implements ScheduledExecutorService {
+	private class TimerExecutorService implements ScheduledExecutorService {
 
 		@Override
 		public void shutdown() {

@@ -1,3 +1,13 @@
+/*******************************************************************************
+ * Copyright (c) 2017 IBM Corporation and others.
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ *
+ * Contributors:
+ *     IBM Corporation - initial API and implementation
+ *******************************************************************************/
 /**
  * 
  */
@@ -72,55 +82,56 @@ public class NIOWaitTimerTest {
 
 	@Test
 	public void test() {
-		final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);
-		TimerCallbackImpl timer1 = new TimerCallbackImpl("");
-		TimerHandler timerHandler1 = waitStrat.createTimer(timer1, timer1.toString());
-		waitStrat.setNanoTime();
-		waitStrat.checkTimer();
-		assertThat(timer1.calledCount, is(0L));
-		timerHandler1.fireIn(1000);
+		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);) {
+			TimerCallbackImpl timer1 = new TimerCallbackImpl("");
+			TimerHandler timerHandler1 = waitStrat.createTimer(timer1, timer1.toString());
+			waitStrat.setNanoTime();
+			waitStrat.checkTimer();
+			assertThat(timer1.calledCount, is(0L));
+			timerHandler1.fireIn(1000);
 
-		waitStrat.setNanoTime();
-		waitStrat.checkTimer();
-		assertThat(timer1.calledCount, is(0L));
-		nanoTime = 2000;
-		waitStrat.setNanoTime();
-		waitStrat.checkTimer();
-		assertThat(timer1.calledCount, is(1L));
-		waitStrat.setNanoTime();
-		waitStrat.checkTimer();
-		assertThat(timer1.calledCount, is(1L));
-		{
-			timerHandler1.fireIn(500);
+			waitStrat.setNanoTime();
+			waitStrat.checkTimer();
+			assertThat(timer1.calledCount, is(0L));
+			nanoTime = 2000;
 			waitStrat.setNanoTime();
 			waitStrat.checkTimer();
 			assertThat(timer1.calledCount, is(1L));
-			nanoTime = 2499;
 			waitStrat.setNanoTime();
 			waitStrat.checkTimer();
 			assertThat(timer1.calledCount, is(1L));
-			assertThat(timerHandler1.isRegistered(), is(true));
-			nanoTime = 2500;
-			waitStrat.setNanoTime();
-			waitStrat.checkTimer();
-			assertThat(timer1.calledCount, is(2L));
-			assertThat(timerHandler1.isRegistered(), is(false));
+			{
+				timerHandler1.fireIn(500);
+				waitStrat.setNanoTime();
+				waitStrat.checkTimer();
+				assertThat(timer1.calledCount, is(1L));
+				nanoTime = 2499;
+				waitStrat.setNanoTime();
+				waitStrat.checkTimer();
+				assertThat(timer1.calledCount, is(1L));
+				assertThat(timerHandler1.isRegistered(), is(true));
+				nanoTime = 2500;
+				waitStrat.setNanoTime();
+				waitStrat.checkTimer();
+				assertThat(timer1.calledCount, is(2L));
+				assertThat(timerHandler1.isRegistered(), is(false));
+			}
+			{
+				// cancel
+				nanoTime = 2500;
+				timerHandler1.fireIn(500);
+				nanoTime = 2600;
+				waitStrat.setNanoTime();
+				waitStrat.checkTimer();
+				assertThat(timer1.calledCount, is(2L));
+				timerHandler1.cancelTimer();
+				nanoTime = 3000;
+				waitStrat.setNanoTime();
+				waitStrat.checkTimer();
+				assertThat(timer1.calledCount, is(2L));
+			}
+		} finally {
 		}
-		{
-			// cancel
-			nanoTime = 2500;
-			timerHandler1.fireIn(500);
-			nanoTime = 2600;
-			waitStrat.setNanoTime();
-			waitStrat.checkTimer();
-			assertThat(timer1.calledCount, is(2L));
-			timerHandler1.cancelTimer();
-			nanoTime = 3000;
-			waitStrat.setNanoTime();
-			waitStrat.checkTimer();
-			assertThat(timer1.calledCount, is(2L));
-		}
-
 	}
 
 	private class TimerCallbackImpl implements TimerCallback {
@@ -136,7 +147,7 @@ public class NIOWaitTimerTest {
 		public void timerCallback(long dueAt, long currentNanoTime) {
 			calledAt = currentNanoTime;
 			calledCount++;
-			logger.info("TimerCallback fired:{} dueAt:{} actualAt:{} name:{}", calledCount,dueAt,  calledAt,name);
+			logger.info("TimerCallback fired:{} dueAt:{} actualAt:{} name:{}", calledCount, dueAt, calledAt, name);
 		}
 
 	}
@@ -144,17 +155,18 @@ public class NIOWaitTimerTest {
 	@Test
 	public void test2() {
 		nanoTime = 0;
-		final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);
-		TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
-		TimerHandler thList[] = new TimerHandler[50];
-		for (int a = 0; a < tcList.length; a++) {
-			tcList[a] = new TimerCallbackImpl("a:"+a);
-			thList[a] = waitStrat.createTimer(tcList[a], "tc:" + a);
-			thList[a].fireIn(50 + a);
+		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);) {
+			TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
+			TimerHandler thList[] = new TimerHandler[50];
+			for (int a = 0; a < tcList.length; a++) {
+				tcList[a] = new TimerCallbackImpl("a:" + a);
+				thList[a] = waitStrat.createTimer(tcList[a], "tc:" + a);
+				thList[a].fireIn(50 + a);
+			}
+			nanoTime = 1000;
+			waitStrat.setNanoTime();
+			waitStrat.checkTimer();
+		} finally {
 		}
-		nanoTime=1000;
-		waitStrat.setNanoTime();
-		waitStrat.checkTimer();
-
 	}
 }

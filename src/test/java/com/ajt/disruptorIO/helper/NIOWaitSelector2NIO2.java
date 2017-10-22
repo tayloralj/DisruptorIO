@@ -1,3 +1,13 @@
+/*******************************************************************************
+ * Copyright (c) 2017 IBM Corporation and others.
+ * All rights reserved. This program and the accompanying materials
+ * are made available under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution, and is available at
+ * http://www.eclipse.org/legal/epl-v10.html
+ *
+ * Contributors:
+ *     IBM Corporation - initial API and implementation
+ *******************************************************************************/
 package com.ajt.disruptorIO.helper;
 
 import static org.junit.Assert.assertThat;
@@ -157,7 +167,7 @@ public class NIOWaitSelector2NIO2 {
 			final byte[] byteDataToSend = "MyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClient"
 					.getBytes();
 			long actualMessageSendCount = 0;
-			final long startTimeNanos = System.nanoTime();
+			final long startTimeNanos = System.nanoTime()-1;
 			int b = 0;
 			final RingBuffer<TestEvent> rb = disruptorServer.getRingBuffer();
 			while (actualMessageSendCount < toSend) {

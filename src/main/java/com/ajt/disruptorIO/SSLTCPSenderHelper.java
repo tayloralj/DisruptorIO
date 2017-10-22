@@ -27,14 +27,14 @@ import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.NIOWaitStrategy.SelectorCallback;
 
-public class LogRecordSenderHelper implements ConnectionHelper {
-	protected final Logger logger = LoggerFactory.getLogger(LogRecordSenderHelper.class);
+public class SSLTCPSenderHelper implements ConnectionHelper {
+	protected final Logger logger = LoggerFactory.getLogger(SSLTCPSenderHelper.class);
 	protected NIOWaitStrategy wait;
 	private static int count = 0;
 
 	public static boolean recordStats = false;
 
-	public LogRecordSenderHelper(NIOWaitStrategy waiter) {
+	public SSLTCPSenderHelper(NIOWaitStrategy waiter) {
 		this.wait = waiter;
 	}
 
@@ -275,8 +275,13 @@ public class LogRecordSenderHelper implements ConnectionHelper {
 				inReadWrite = false;
 				setKeyStatus();
 			} catch (Exception e) {
-				logger.error("Error on read", e);
-				close();
+				if (isClosed) {
+					logger.warn("Already closed on read callback channel:" + channel);
+				} else {
+					logger.error("Error on read", e);
+
+					close();
+				}
 			}
 		}
 
@@ -286,7 +291,7 @@ public class LogRecordSenderHelper implements ConnectionHelper {
 			try {
 				long written = 0;
 				if (writeBuffer.remaining() < length) {
-					written = flush();
+					written += flush();
 					if (bufferRemaining() < length) {
 						return -1;
 					}
@@ -308,34 +313,45 @@ public class LogRecordSenderHelper implements ConnectionHelper {
 			if (logger.isTraceEnabled()) {
 				logger.trace(" flush id:{} posn:{}", id, writeBuffer.position());
 			}
-			writeBuffer.flip();
-			final int remaining = writeBuffer.remaining();
-			final int writeCount = socketChannel.write(writeBuffer);
-			if (writeCount == -1) {
-				close();
-				return -1;
-			} else if (writeCount == remaining) {
-				writeBuffer.clear();
-				if (isWriteBlocked) {
-					isWriteBlocked = false;
-					callback.writeUnblocked(this);
+			final int writeCount;
+			try {
+				writeBuffer.flip();
+				final int remaining = writeBuffer.remaining();
+				writeCount = socketChannel.write(writeBuffer);
+				if (writeCount == -1) {
+					close();
+					return -1;
+				} else if (writeCount == remaining) {
+					writeBuffer.clear();
+					if (isWriteBlocked) {
+						isWriteBlocked = false;
+						callback.writeUnblocked(this);
+					}
+					bytesWritten += writeCount;
+				} else {
+					// only wrote some data. block
+					writeBuffer.compact();
+					if (!isWriteBlocked) {
+						writeBlockStartAt = wait.currentTimeNanos;
+						isWriteBlocked = true;
+						callback.writeNowBlocked(this);
+					}
+					bytesWritten += writeCount;
 				}
-				bytesWritten += writeCount;
-			} else {
-				// only wrote some data. block
-				writeBuffer.compact();
-				if (!isWriteBlocked) {
-					writeBlockStartAt = wait.currentTimeNanos;
-					isWriteBlocked = true;
-					callback.writeNowBlocked(this);
+				flushCount++;
+				inReadWrite = false;
+				setKeyStatus();
+				return writeCount;
+			} catch (IOException ioe) {
+				if (isClosed) {
+					logger.warn("calling flush on already closed channel:" + socketChannel);
+				} else {
+					throw ioe;
 				}
-				bytesWritten += writeCount;
+			} finally {
 			}
-			flushCount++;
-			inReadWrite = false;
+			throw new IOException("unknown error");
 
-			setKeyStatus();
-			return bufferRemaining();
 		}
 
 		private void setKeyStatus() {
@@ -382,11 +398,19 @@ public class LogRecordSenderHelper implements ConnectionHelper {
 		@Override
 		public void close() {
 			logger.info("Closing local:{} remote:{}", localAddress, remoteAddress);
+
 			if (isClosed) {
 				logger.info("Already closed");
 				return;
 			}
 			isClosed = true;
+			if (bytesInBuffer() > 0) {
+				try {
+					flush();
+				} catch (Exception e) {
+
+				}
+			}
 			try {
 				if (socketChannel != null && socketChannel.isOpen()) {
 					socketChannel.close();
@@ -416,7 +440,7 @@ public class LogRecordSenderHelper implements ConnectionHelper {
 			}
 
 			callback.closed(this);
-
+			logger.info("Close Completed");
 		}
 
 		@Override

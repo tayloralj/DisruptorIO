@@ -10,6 +10,7 @@
  *******************************************************************************/
 package com.ajt.disruptorIO;
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -21,6 +22,17 @@ import java.nio.channels.SelectableChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.security.KeyManagementException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.UnrecoverableEntryException;
+import java.security.cert.CertificateException;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.TrustManagerFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,9 +45,34 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 	private static int count = 0;
 
 	public static boolean recordStats = false;
+	private static boolean debug = false;
 
-	public SSLTCPSenderHelper(NIOWaitStrategy waiter) {
+	final private SSLContext sslc;
+
+	public SSLTCPSenderHelper(NIOWaitStrategy waiter, final String keyStoreFile, final String trustStoreFile,
+			final String passwd) throws KeyStoreException, CertificateException, NoSuchAlgorithmException, IOException,
+			UnrecoverableEntryException, KeyManagementException {
 		this.wait = waiter;
+		KeyStore ks = KeyStore.getInstance("JKS");
+		KeyStore ts = KeyStore.getInstance("JKS");
+
+		char[] passphrase = "passphrase".toCharArray();
+
+		ks.load(new FileInputStream(keyStoreFile), passphrase);
+		ts.load(new FileInputStream(trustStoreFile), passphrase);
+
+		KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
+		kmf.init(ks, passphrase);
+
+		TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509");
+		tmf.init(ts);
+
+		SSLContext sslCtx = SSLContext.getInstance("TLS");
+
+		sslCtx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
+	
+
+		sslc = sslCtx;
 	}
 
 	/*
@@ -66,15 +103,17 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 	 * com.ajt.disruptorIO.SenderCallback)
 	 */
 	@Override
-	public ConnectionHelper.SenderCallin bindTo(final InetSocketAddress local, SenderCallback callback)
+	public ConnectionHelper.SenderCallin bindTo(final InetSocketAddress local, final SenderCallback callback
+		)
 			throws IOException {
 		final ServerSocketChannel socketChannel = ServerSocketChannel.open();
 		socketChannel.configureBlocking(false);
 		socketChannel.bind(local, 0);
 
 		logger.info("bindTo:{} channel:{}", local, socketChannel);
-
+		 
 		final IOHandler IOh = new IOHandler(socketChannel, callback);
+		
 		return IOh;
 
 	}
@@ -126,6 +165,9 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			} else {
 				throw new ClosedChannelException();
 			}
+			SSLEngine engine=sslc.createSSLEngine();
+			
+
 		}
 
 		private IOHandler(final SocketChannel sc, final SenderCallback callback) throws IOException {

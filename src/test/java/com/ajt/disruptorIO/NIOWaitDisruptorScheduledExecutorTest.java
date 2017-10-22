@@ -16,8 +16,6 @@ import static org.junit.Assert.assertThat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
@@ -32,8 +30,6 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.ajt.disruptorIO.LatencyTimer;
-import com.ajt.disruptorIO.NIOWaitStrategy;
 import com.lmax.disruptor.EventFactory;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.RingBuffer;
@@ -47,7 +43,7 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 
 	}
 	private final Logger logger = LoggerFactory.getLogger(NIOWaitDisruptorScheduledExecutorTest.class);
-	private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
+//	private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
 	NIOWaitStrategy.NIOClock clock;
 	NIOWaitStrategy nioWaitStrategy;
 	Disruptor<TestEvent> disruptor;
@@ -309,7 +305,6 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 	}
 
 	private class TestEventHandler implements EventHandler<TestEvent> {
-		private final Logger logger = LoggerFactory.getLogger(TestEventHandler.class);
 		private AtomicLong counter = new AtomicLong();
 
 		@Override

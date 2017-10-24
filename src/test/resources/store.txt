@@ -1,0 +1,12 @@
+keytool -genkey -v -alias serverKey -validity 3650 -keyalg RSA -keysize 2048 -sigalg SHA256withRSA  -keypass password -keystore server.jks -storepass password
+keytool -genkey -v -alias clientKey -validity 3650 -keyalg RSA -keysize 2048 -sigalg SHA256withRSA -keypass password -keystore client.jks -storepass password
+
+keytool -exportcert -v -keypass password -storepass password  -alias serverKey -keystore server.jks -file servercert.cert
+keytool -exportcert -v -keypass password -storepass password  -alias clientKey -keystore client.jks -file clientcert.cert
+
+
+keytool -importcert -v -noprompt -keystore client.truststore -alias serverKey -storepass password  -file servercert.cert
+keytool -importcert -v -noprompt -keystore server.truststore -alias serverKey -storepass password  -file clientcert.cert
+
+keytool -list  -v -storepass password -keystore server.jks
+keytool -list  -v -storepass password -keystore client.jks

@@ -263,7 +263,7 @@ public class NIOWaitSelector2NIO2 {
 			helper = new TCPSenderHelper(nioWait);
 			clients = new ClientConnectionHelper[count];
 			for (int a = 0; a < count; a++) {
-				clients[a] = new ClientConnectionHelper(this, a, sa, nioWait);
+				clients[a] = new ClientConnectionHelper(writeRatePerSecond, a, sa, nioWait);
 			}
 		}
 
@@ -323,7 +323,7 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000000L;
 		final int clientCount = 2;
 		final boolean lossy = false;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -336,7 +336,7 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000_000L;
 		final int clientCount = 2;
 		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -349,7 +349,7 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000000L;
 		final int clientCount = 2;
 		final boolean lossy = false;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -362,7 +362,7 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000_000L;
 		final int clientCount = 2;
 		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -375,7 +375,7 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000000L;
 		final int clientCount = 20;
 		final boolean lossy = false;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -388,7 +388,7 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000_000L;
 		final int clientCount = 20;
 		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(nioWaitStrategyServer, lossy, null) };
+		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}

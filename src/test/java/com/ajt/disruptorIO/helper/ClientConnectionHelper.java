@@ -19,6 +19,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.hamcrest.Matchers;
 import org.junit.Assert;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.ConnectionHelper;
 import com.ajt.disruptorIO.NIOWaitStrategy;
@@ -32,7 +34,9 @@ class ClientConnectionHelper implements SenderCallback {
 	/**
 	 * 
 	 */
-	private final NIOWaitSelector2NIO2.TestEventClient testEventClient;
+
+	private final Logger logger = LoggerFactory.getLogger(ClientConnectionHelper.class);
+	// private final NIOWaitSelector2NIO2.TestEventClient testEventClient;
 	boolean isClosed = false;
 	long readShouldBeAtLeast = 0;
 	long writeShouldBeAtLeast = 0;
@@ -63,10 +67,10 @@ class ClientConnectionHelper implements SenderCallback {
 	final Histogram rttHisto = TestEvent.getHisto();
 	ConnectionHelper.SenderCallin callin;
 	private long startBlockAt = 0;
+	private final long writeRatePerSecond;
 
-	public ClientConnectionHelper(NIOWaitSelector2NIO2.TestEventClient testEventClient, int id, SocketAddress sa,
-			NIOWaitStrategy nioWait) {
-		this.testEventClient = testEventClient;
+	public ClientConnectionHelper(final long writeRatePerSecond, int id, SocketAddress sa, NIOWaitStrategy nioWait) {
+		this.writeRatePerSecond = writeRatePerSecond;
 		this.id = id;
 
 		writeBytes = new byte[256];
@@ -91,7 +95,7 @@ class ClientConnectionHelper implements SenderCallback {
 		// start sending own data to get echo'd back
 		timerHandler.fireIn(0);
 		startTimeNano = timerHandler.currentNanoTime();
-		this.testEventClient.logger.info("opConnect Complete :" + callin);
+		logger.info("opConnect Complete :" + callin);
 
 	}
 
@@ -99,14 +103,14 @@ class ClientConnectionHelper implements SenderCallback {
 
 	@Override
 	public void writeNowBlocked(final ConnectionHelper.SenderCallin callin) {
-		this.testEventClient.logger.info(" client blocked write callin:{}", callin.getLocalAddress());
+		logger.info(" client blocked write callin:{}", callin.getLocalAddress());
 		blocked = true;
 		startBlockAt = System.nanoTime();
 	}
 
 	@Override
 	public void writeUnblocked(final ConnectionHelper.SenderCallin callin) {
-		this.testEventClient.logger.info("client unblocked write for(us):{} callin:{}",
+		logger.info("client unblocked write for(us):{} callin:{}",
 				TimeUnit.NANOSECONDS.toMicros(System.nanoTime() - startBlockAt), callin.getLocalAddress());
 		blocked = false;
 	}
@@ -123,9 +127,8 @@ class ClientConnectionHelper implements SenderCallback {
 		readBuffer.limit(bufferPosition);
 		while (true) {
 			if (readBuffer.limit() - readBuffer.position() < 8) {
-				if (this.testEventClient.logger.isTraceEnabled()) {
-					this.testEventClient.logger.trace("SHort Buff COMPACT :{} :{}", readBuffer.limit(),
-							readBuffer.position());
+				if (logger.isTraceEnabled()) {
+					logger.trace("SHort Buff COMPACT :{} :{}", readBuffer.limit(), readBuffer.position());
 				}
 				readBuffer.compact();
 				break;
@@ -139,7 +142,7 @@ class ClientConnectionHelper implements SenderCallback {
 				final int type = TestEvent.getIntFromArray(readBytes, readBuffer.position() + 4);
 				switch (type) {
 				case TestEvent.MessageType.clientRequestMessage:
-					this.testEventClient.logger.debug("unknown type");
+					logger.debug("unknown type");
 					break;
 				case TestEvent.MessageType.dataFromServerEvent: {
 					final long sendTime = TestEvent.getLongFromArray(readBytes,
@@ -148,10 +151,10 @@ class ClientConnectionHelper implements SenderCallback {
 					propHisto.addObservation(nowNanoTime - sendTime);
 					// occasional logging
 					if ((messageReadCount & ((256 * 1024) - 1)) == 0) {
-						this.testEventClient.logger.info("id:{} Prop Histo:{} {}", id, propHisto.getCount(),
+						logger.info("id:{} Prop Histo:{} {}", id, propHisto.getCount(),
 								TestEvent.toStringHisto(propHisto));
 
-						this.testEventClient.logger.debug(
+						logger.debug(
 								"Took to recv:{} len:{} posn:{} lim:{} readCount:{} bytesRead:{} bytesReadCount:{}",
 								(nowNanoTime - sendTime), length, startPosition, readBuffer.limit(), bytesRead,
 								bytesRead, bytesReadCount);
@@ -181,9 +184,8 @@ class ClientConnectionHelper implements SenderCallback {
 					readBuffer.position(startPosition);
 				}
 			} else {
-				if (this.testEventClient.logger.isTraceEnabled()) {
-					this.testEventClient.logger.info("Client COMPACT posn:{} lim:{}", readBuffer.position(),
-							readBuffer.limit());
+				if (logger.isTraceEnabled()) {
+					logger.info("Client COMPACT posn:{} lim:{}", readBuffer.position(), readBuffer.limit());
 				}
 				readBuffer.compact();
 				break;
@@ -194,7 +196,7 @@ class ClientConnectionHelper implements SenderCallback {
 
 	@Override
 	public void closed(final ConnectionHelper.SenderCallin callin) {
-		this.testEventClient.logger.info("Close from callin:{}", callin);
+		logger.info("Close from callin:{}", callin);
 		close();
 
 	}
@@ -205,7 +207,7 @@ class ClientConnectionHelper implements SenderCallback {
 		}
 		isClosed = true;
 		timerHandler.cancelTimer();
-		this.testEventClient.logger.info(
+		logger.info(
 				"\tClientClosing id:{} \n"
 						+ "\n\tREAD_CLIENT:bytesRead:{} messageSentCounter:{} serverMessageRead:{} serverRttRead:{}"
 						+ "\n\tWRITE_CLIENT: totalWrite:{} writeSignalCount:{} writeCount:{}" //
@@ -231,8 +233,7 @@ class ClientConnectionHelper implements SenderCallback {
 
 				final long elapsed = currentNanoTime - startTimeNano;
 				boolean somethingWritten = false;
-				while (elapsed * ClientConnectionHelper.this.testEventClient.writeRatePerSecond > totalWriteSocket
-						* 1000000000L && !blocked) {
+				while (elapsed * writeRatePerSecond > totalWriteSocket * 1000000000L && !blocked) {
 
 					TestEvent.putIntToArray(writeBytes, TestEvent.Offsets.type,
 							TestEvent.MessageType.clientRequestMessage);
@@ -245,8 +246,7 @@ class ClientConnectionHelper implements SenderCallback {
 					final long couldSend = callin.sendMessage(writeBytes, 0, writeBytes.length);
 					if (couldSend == -1) {
 						messageCounter--;
-						ClientConnectionHelper.this.testEventClient.logger
-								.debug("got blocked trying to write, buffer full :-(");
+						logger.debug("got blocked trying to write, buffer full :-(");
 						break;
 					}
 					somethingWritten = true;
@@ -261,7 +261,7 @@ class ClientConnectionHelper implements SenderCallback {
 				timerHandler.fireIn(fastTimer);
 
 			} catch (final Exception e) {
-				ClientConnectionHelper.this.testEventClient.logger.error("Errro in callback", e);
+				logger.error("Errro in callback", e);
 				close();
 			}
 		}

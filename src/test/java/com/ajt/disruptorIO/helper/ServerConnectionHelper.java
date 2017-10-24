@@ -18,6 +18,7 @@ import java.net.SocketAddress;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.hamcrest.Matchers;
@@ -27,8 +28,6 @@ import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.ConnectionHelper;
 import com.ajt.disruptorIO.ConnectionHelper.SenderCallback;
-import com.ajt.disruptorIO.NIOWaitStrategy;
-import com.ajt.disruptorIO.TCPSenderHelper;
 import com.ajt.disruptorIO.TestEvent;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.collections.Histogram;
@@ -36,6 +35,7 @@ import com.lmax.disruptor.collections.Histogram;
 public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoCloseable {
 	private final Logger logger = LoggerFactory.getLogger(ServerConnectionHelper.class);
 	final AtomicLong counter = new AtomicLong();
+	final AtomicBoolean isClosed = new AtomicBoolean(false);
 	private final boolean coalsce;
 	private final Histogram elapsedHisto = TestEvent.getHisto();
 	private final Histogram delayHisto = TestEvent.getHisto();
@@ -45,10 +45,10 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 	public volatile SocketAddress remoteAddress = null;
 	private ConnectionHelper.SenderCallin serverCallin;
 
-	public ServerConnectionHelper(final NIOWaitStrategy waiter, final boolean compact,
+	public ServerConnectionHelper(final ConnectionHelper serverSenderHelper, final boolean compact,
 			final InetSocketAddress address) {
 		coalsce = compact;
-		serverSenderHelper = new TCPSenderHelper(waiter);
+		this.serverSenderHelper=serverSenderHelper;
 		try {
 			serverCallin = serverSenderHelper.bindTo(address, new NIOServerCallback());
 
@@ -71,19 +71,24 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 				}
 				return;
 			}
-			ecc[event.targetID].handleData(event, sequence, endOfBatch);
-			// flush anything without a batch
-			if (endOfBatch) {
-				for (int a = 0; a < ecc.length; a++) {
-					if (ecc[a] != null) {
-						try {
-							ecc[a].flush();
-						} catch (Exception e) {
-							logger.error("Error during flush id:" + a + " " + ecc[a], e);
-							ecc[a] = null;
+			try {
+				ecc[event.targetID].handleData(event, sequence, endOfBatch);
+				// flush anything without a batch
+				if (endOfBatch) {
+					for (int a = 0; a < ecc.length; a++) {
+						if (ecc[a] != null) {
+							try {
+								ecc[a].flush();
+							} catch (Exception e) {
+								logger.error("Error during flush id:" + a + " " + ecc[a], e);
+								ecc[a] = null;
+							}
 						}
 					}
 				}
+			} catch (Exception e) {
+				Assert.fail("Error in test" + e);
+				close();
 			}
 			break;
 
@@ -95,6 +100,10 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		final long end = System.nanoTime();
 		delayHisto.addObservation(now - event.nanoSendTime);
 		elapsedHisto.addObservation(end - now);
+	}
+
+	public boolean isClosed() {
+		return isClosed.get();
 	}
 
 	public void close() {
@@ -111,6 +120,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 				ecc[a] = null;
 			}
 		}
+		isClosed.set(true);
 	}
 
 	class NIOServerCallback implements SenderCallback {

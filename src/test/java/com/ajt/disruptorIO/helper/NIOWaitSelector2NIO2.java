@@ -167,7 +167,7 @@ public class NIOWaitSelector2NIO2 {
 			final byte[] byteDataToSend = "MyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClientMyMessageToTheClient"
 					.getBytes();
 			long actualMessageSendCount = 0;
-			final long startTimeNanos = System.nanoTime()-1;
+			final long startTimeNanos = System.nanoTime() - 1;
 			int b = 0;
 			final RingBuffer<TestEvent> rb = disruptorServer.getRingBuffer();
 			while (actualMessageSendCount < toSend) {
@@ -323,7 +323,8 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000000L;
 		final int clientCount = 2;
 		final boolean lossy = false;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
+		handlers = new ServerConnectionHelper[] {
+				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -336,7 +337,8 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000_000L;
 		final int clientCount = 2;
 		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
+		handlers = new ServerConnectionHelper[] {
+				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -349,7 +351,8 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000000L;
 		final int clientCount = 2;
 		final boolean lossy = false;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
+		handlers = new ServerConnectionHelper[] {
+				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -362,7 +365,8 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000_000L;
 		final int clientCount = 2;
 		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
+		handlers = new ServerConnectionHelper[] {
+				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -375,7 +379,8 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000000L;
 		final int clientCount = 20;
 		final boolean lossy = false;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
+		handlers = new ServerConnectionHelper[] {
+				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -388,7 +393,8 @@ public class NIOWaitSelector2NIO2 {
 		final long writeRatePerSecond = 1_000_000L;
 		final int clientCount = 20;
 		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] { new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null) };
+		handlers = new ServerConnectionHelper[] {
+				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}

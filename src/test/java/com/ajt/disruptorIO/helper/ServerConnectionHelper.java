@@ -39,16 +39,17 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 	private final boolean coalsce;
 	private final Histogram elapsedHisto = TestEvent.getHisto();
 	private final Histogram delayHisto = TestEvent.getHisto();
-	private final ServerConnectionHelper.EstablishedServerConnectionCallback[] ecc = new ServerConnectionHelper.EstablishedServerConnectionCallback[128];
+	private final ServerConnectionHelper.EstablishedServerConnectionCallback[] ecc;
 	private final ConnectionHelper serverSenderHelper;
 
 	public volatile SocketAddress remoteAddress = null;
 	private ConnectionHelper.SenderCallin serverCallin;
 
 	public ServerConnectionHelper(final ConnectionHelper serverSenderHelper, final boolean compact,
-			final InetSocketAddress address) {
+			final InetSocketAddress address, final int maxClientCount) {
 		coalsce = compact;
 		this.serverSenderHelper = serverSenderHelper;
+		ecc = new ServerConnectionHelper.EstablishedServerConnectionCallback[maxClientCount];
 		try {
 			serverCallin = serverSenderHelper.bindTo(address, new NIOServerCallback());
 

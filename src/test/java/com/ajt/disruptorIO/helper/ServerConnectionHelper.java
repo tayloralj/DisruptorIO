@@ -48,7 +48,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 	public ServerConnectionHelper(final ConnectionHelper serverSenderHelper, final boolean compact,
 			final InetSocketAddress address) {
 		coalsce = compact;
-		this.serverSenderHelper=serverSenderHelper;
+		this.serverSenderHelper = serverSenderHelper;
 		try {
 			serverCallin = serverSenderHelper.bindTo(address, new NIOServerCallback());
 
@@ -67,7 +67,8 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		case data:
 			if (ecc[event.targetID] == null) {
 				if (endOfBatch) {
-					logger.error("Erro no connection with targetID:{})", event.targetID);
+					logger.error("Erro no connection with targetID:{})",
+							event.targetID + " " + serverCallin.toString());
 				}
 				return;
 			}
@@ -167,7 +168,9 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		@Override
 		public void closed(final ConnectionHelper.SenderCallin callin) {
 			logger.info("closed callin:{}", callin);
-			ecc[callin.getId()].close();
+			if (ecc[callin.getId()] != null) {
+				ecc[callin.getId()].close();
+			}
 		}
 
 		@Override

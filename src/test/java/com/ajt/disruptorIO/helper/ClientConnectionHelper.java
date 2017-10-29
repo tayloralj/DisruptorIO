@@ -69,7 +69,7 @@ class ClientConnectionHelper implements SenderCallback {
 	private long startBlockAt = 0;
 	private final long writeRatePerSecond;
 
-	public ClientConnectionHelper(final long writeRatePerSecond, int id, SocketAddress sa, NIOWaitStrategy nioWait) {
+	public ClientConnectionHelper(final long writeRatePerSecond, final int id, final SocketAddress sa, final NIOWaitStrategy nioWait) {
 		this.writeRatePerSecond = writeRatePerSecond;
 		this.id = id;
 

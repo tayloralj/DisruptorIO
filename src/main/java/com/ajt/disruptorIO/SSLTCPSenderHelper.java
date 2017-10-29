@@ -12,8 +12,10 @@ package com.ajt.disruptorIO;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.StandardSocketOptions;
+import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.ClosedChannelException;
@@ -28,19 +30,23 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.UnrecoverableEntryException;
 import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 
-import javax.net.ssl.HandshakeCompletedListener;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLEngineResult.HandshakeStatus;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509ExtendedTrustManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.NIOWaitStrategy.SelectorCallback;
+import com.google.common.io.Resources;
 
 public class SSLTCPSenderHelper implements ConnectionHelper {
 	protected final Logger logger = LoggerFactory.getLogger(SSLTCPSenderHelper.class);
@@ -60,27 +66,79 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		this.wait = waiter;
 
 		if (debug) {
-			System.setProperty("javax.net.debug", "all");
+			// System.setProperty("javax.net.debug", "all");
 		}
+		char[] passphrase = passwd.toCharArray();
+
 		final KeyStore ks = KeyStore.getInstance("JKS");
-		final KeyStore ts = KeyStore.getInstance("JKS");
-
-		char[] passphrase = "passphrase".toCharArray();
-
-		ks.load(ClassLoader.getSystemResourceAsStream(keyStoreFile), passphrase);
-		ts.load(ClassLoader.getSystemResourceAsStream(trustStoreFile), passphrase);
-
-		KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+		final URL keystoreURL = Resources.getResource(keyStoreFile);
+		ks.load(keystoreURL.openStream(), passphrase);
+		final KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
 		kmf.init(ks, passphrase);
+		logger.info("KeyManager:{} keyStore:{}", kmf, ks);
 
-		TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+		final KeyStore ts = KeyStore.getInstance("JKS");
+		final URL truststoreURL = Resources.getResource(trustStoreFile);
+		ts.load(truststoreURL.openStream(), passphrase);
+		final TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
 		tmf.init(ts);
+		logger.info("TMF:{} ", tmf);
+		X509ExtendedTrustManager tmf2 = new X509ExtendedTrustManager() {
 
-		// final SSLContext sslCtx = SSLContext.getInstance("TLSv1.2");
-		final SSLContext sslCtx = SSLContext.getDefault();
+			@Override
+			public X509Certificate[] getAcceptedIssuers() {
+
+				return ((X509ExtendedTrustManager) tmf.getTrustManagers()[0]).getAcceptedIssuers();
+			}
+
+			@Override
+			public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+				logger.info("checkServerTrusted X509Certificate authType:" + authType);
+
+			}
+
+			@Override
+			public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+				logger.info("checkClientTrusted authType:" + authType);
+
+			}
+
+			@Override
+			public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine)
+					throws CertificateException {
+				logger.info("checkServerTrusted authType:" + authType + " engine:" + engine);
+
+			}
+
+			@Override
+			public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket)
+					throws CertificateException {
+				logger.info("checkServerTrusted authTYpe:" + authType + " socket:" + socket);
+
+			}
+
+			@Override
+			public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine)
+					throws CertificateException {
+				logger.info("checkClientTrusted authType:" + authType + " engine:" + engine);
+
+			}
+
+			@Override
+			public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket)
+					throws CertificateException {
+				logger.info("checkServerTrusted");
+
+			}
+		};
+
+		final SSLContext sslCtx = SSLContext.getInstance("TLSv1.2");
+		// final SSLContext sslCtx = SSLContext.getDefault();
 
 		// sslCtx.init(null, null, null);
-	//	sslCtx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), new SecureRandom());
+		// sslCtx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), new
+		// SecureRandom());
+		sslCtx.init(kmf.getKeyManagers(), new TrustManager[] { tmf2 }, new SecureRandom());
 
 		sslc = sslCtx;
 	}
@@ -137,6 +195,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		sslEngine.setUseClientMode(false);
 		sslEngine.setEnabledProtocols(sslEngine.getSupportedProtocols());
 		sslEngine.setEnabledCipherSuites(sslEngine.getSupportedCipherSuites());
+
 		for (int a = 0; a < sslEngine.getEnabledCipherSuites().length; a++) {
 			logger.info("Enabled server:{}", sslEngine.getEnabledCipherSuites()[a]);
 		}
@@ -157,10 +216,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		private final SenderCallback callback;
 		private SocketAddress remoteAddress;
 		private SocketAddress localAddress;
-		private final ByteBuffer readBuffer;
+		private final ByteBuffer decodedReadBuffer;
 		private final ByteBuffer sslReadBuffer;
 		private final ByteBuffer writeBuffer;
-		private final ByteBuffer sslWriteBuffer;
+		private ByteBuffer sslWriteBuffer;
 		private final byte[] readBytes;
 		private final byte[] writeBytes;
 		private boolean isClosed = false;
@@ -179,6 +238,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		private long flushCount = 0;
 
 		private final SSLEngine sslEngine;
+		final static int size = 131072;
 
 		private IOHandler(final ServerSocketChannel ssc, final SenderCallback callback, final SSLEngine sslEngine)
 				throws IOException, ClosedChannelException {
@@ -187,15 +247,15 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			this.callback = callback;
 			this.counter = count++;
 			this.sslEngine = sslEngine;
-			readBytes = new byte[16384];
-			writeBytes = new byte[16384];
+			readBytes = new byte[size];
+			writeBytes = new byte[size];
 
-			readBuffer = ByteBuffer.wrap(readBytes);
-			readBuffer.order(ByteOrder.LITTLE_ENDIAN);
+			decodedReadBuffer = ByteBuffer.wrap(readBytes);
+			decodedReadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 			writeBuffer = ByteBuffer.wrap(writeBytes);
 			writeBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
-			sslReadBuffer = ByteBuffer.wrap(new byte[readBytes.length * 2]);
+			sslReadBuffer = ByteBuffer.wrap(new byte[readBytes.length / 2]);
 			sslReadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
 			sslWriteBuffer = ByteBuffer.wrap(new byte[writeBytes.length * 2]);
@@ -220,13 +280,13 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			this.callback = callback;
 			this.counter = count++;
 			this.sslEngine = sslEngine;
-			readBytes = new byte[16384];
-			writeBytes = new byte[16384];
-			readBuffer = ByteBuffer.wrap(readBytes);
-			readBuffer.order(ByteOrder.LITTLE_ENDIAN);
+			readBytes = new byte[size];
+			writeBytes = new byte[size];
+			decodedReadBuffer = ByteBuffer.wrap(readBytes);
+			decodedReadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 			writeBuffer = ByteBuffer.wrap(writeBytes);
 			writeBuffer.order(ByteOrder.LITTLE_ENDIAN);
-			sslReadBuffer = ByteBuffer.wrap(new byte[readBytes.length * 2]);
+			sslReadBuffer = ByteBuffer.wrap(new byte[readBytes.length / 2]);
 			sslReadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 
 			sslWriteBuffer = ByteBuffer.wrap(new byte[writeBytes.length * 2]);
@@ -253,7 +313,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 					+ " opReadCallback:" + opReadCallback//
 					+ " opWriteCallback:" + opWriteCallback//
 					+ " messageSendCount:" + messageSendCount//
-					+ " flushCount:" + flushCount;
+					+ " flushCount:" + flushCount//
+					+ " sslWriteBufferPositon:" + sslWriteBuffer.position()//
+					+ " writeBuffer:" + writeBuffer.position();
+
 		}
 
 		public int maxBuffer() {
@@ -265,43 +328,41 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		}
 
 		private void runDelegatedTasks(final SSLEngineResult result) throws Exception {
-
-			manageHandshake(result.getHandshakeStatus());
+			logger.debug("run delegatedTaks result:{} status:{}", result, sslEngine.getHandshakeStatus());
 
 			switch (result.getStatus()) {
 			case BUFFER_OVERFLOW:
+				logger.info("STATUS: BUFFER_OVERFLOW");
 				break;
 			case BUFFER_UNDERFLOW:
+				logger.info("STATUS: BUFFER_UNDERFLOW");
 				break;
 			case CLOSED:
-				logger.info("ssl session closed:{}", result);
+				logger.info("STATUS: CLOSED ssl session closed:{}", result);
 				close();
 				break;
 			case OK:
+				logger.info("STATUS: OKAY");
 				break;
 			default:
-				logger.error("Error unknown status");
+				logger.error("Error unknown status " + result.getStatus());
 			}
 		}
 
-		boolean needUnwrap = true;
-		boolean needWrap = true;
+		void manageHandshake(final HandshakeStatus startStatus) throws Exception {
 
-		void manageHandshake(final HandshakeStatus status) throws Exception {
-			switch (status) {
+			switch (startStatus) {
 			case FINISHED:
-				logger.info("FINISHED Handshake completed:" + status);
+				logger.info("WRAP FINISHED Handshake completed:" + startStatus);
 				callback.connected(this);
 
 				isWriteBlocked = false;
 				isReadBlocked = false;
-				callback.writeUnblocked(this);
-				needUnwrap = false;
-				needWrap = false;
+				callback.connected(this);
+				setKeyStatus();
 				break;
 			case NEED_UNWRAP:
 				logger.debug("NEED_UNWRAP");
-				needUnwrap = true;
 				break;
 			case NEED_WRAP: {
 				logger.info("NEED_WRAP  writeBiffer.posn:{} ssl.posn:{}", writeBuffer.position(),
@@ -310,6 +371,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				writeBuffer.flip();
 				sslWriteBuffer.clear();
 				final SSLEngineResult result = sslEngine.wrap(writeBuffer, sslWriteBuffer);
+				logger.info("wrap:{}", result);
 				final int sslRemaining = sslWriteBuffer.position();
 				sslWriteBuffer.flip();
 				final int writeCount = socketChannel.write(sslWriteBuffer);
@@ -321,14 +383,14 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 					close();
 					throw new IOException("Error didnt write all during need wrap");
 				}
-				logger.info("NEED_WRAP send:{}", writeCount);
+				logger.info("NEED_WRAP sent:{}", writeCount);
 				writeBuffer.clear();
 				sslWriteBuffer.clear();
-				needWrap = false;
 
 				final HandshakeStatus hsStatus = result.getHandshakeStatus();
-				logger.info("Recursive wrap result :{}", result);
 				manageHandshake(hsStatus);
+				logger.info("break Recursive wrap status :{} afterRecurse:{}", hsStatus,
+						sslEngine.getHandshakeStatus());
 				break;
 			}
 			case NEED_TASK:
@@ -342,7 +404,8 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				logger.info("Recursive wrap:{}", hsStatus);
 				manageHandshake(hsStatus);
 
-				logger.info("\tnew HandshakeStatus: " + hsStatus);
+				logger.info("\tNEED_TASK  Recursive HandshakeStatus: " + hsStatus + " now:"
+						+ sslEngine.getHandshakeStatus());
 
 				break;
 
@@ -350,7 +413,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				logger.info("Not handshaking");
 				break;
 			default:
-				logger.error("handskare status:" + status);
+				logger.error("handskare status:" + startStatus);
 			}
 
 		}
@@ -370,7 +433,6 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				final IOHandler handler = new IOHandler(socketChannel, callback, sslEngineConnectio);
 				final SelectionKey key = wait.registerSelectableChannel(socketChannel, handler);
 				handler.sk = key;
-				key.interestOps(SelectionKey.OP_READ);
 
 				handler.remoteAddress = socketChannel.getRemoteAddress();
 				handler.localAddress = socketChannel.getLocalAddress();
@@ -380,7 +442,8 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				isWriteBlocked = false;
 				isReadBlocked = false;
 
-				callback.writeNowBlocked(this);
+				key.interestOps(SelectionKey.OP_READ);
+
 				logger.info("opAccept local:{} remote:{}", localAddress, remoteAddress);
 			} catch (Exception ioe) {
 				logger.error("Error connecting to server socket:", ioe);
@@ -413,8 +476,8 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 				isReadBlocked = false;
 				isWriteBlocked = false;
-				callback.writeNowBlocked(this);
-				setKeyStatus();
+
+				sk.interestOps(SelectionKey.OP_READ);
 			} catch (Exception ioe) {
 				logger.error("Error finishing connection", ioe);
 				close();
@@ -423,10 +486,33 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public void opWrite(final SelectableChannel channel, long currentTimeNanos) {
+			logger.info("opWrite start" );
+
 			opWriteCallback++;
 			inReadWrite = true;
 			try {
-				flush();
+				// only flush the ssl write buffer
+				final int remainingToWrite = sslWriteBuffer.limit();
+				final int written = socketChannel.write(sslWriteBuffer);
+				if (written == remainingToWrite) {
+					sslWriteBuffer.clear();
+					isWriteBlocked = false;
+					if (writeBuffer.position() > 0) {
+						// may block again.
+						logger.info("opWrite still data to flush:"+toString());
+						flush();
+						logger.info("opWrite flush completed:"+toString());
+						
+					}
+					if (!isWriteBlocked) {
+						// unblock
+						writeBlockStartAt=0;
+						callback.writeUnblocked(this);
+					}
+				} else {
+					// still blocked
+					sslWriteBuffer.compact();
+				}
 
 			} catch (Exception e) {
 				inReadWrite = false;
@@ -434,6 +520,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				close();
 				return;
 			}
+			inReadWrite = false;
 			setKeyStatus();
 		}
 
@@ -445,29 +532,69 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				// odd.
 				return;
 			}
+			logger.info("opRead");
+			decodedReadBuffer.clear();
 			inReadWrite = true;
+			int callbackBytesRead = -1;
 			try {
-				int callbackBytesRead = -1;
+
 				int maxReadCounter = 10;
 				do {
+
+					logger.info("opRead posn:{}", sslReadBuffer.position());
 					callbackBytesRead = socketChannel.read(sslReadBuffer);
+					logger.info("opRead posn:{}", sslReadBuffer.position());
 					if (callbackBytesRead == -1) {
 						close();
 						inReadWrite = false;
 						return;
 					}
 					if (callbackBytesRead == 0) {
+						maxReadCounter = 0;
 						break;
 					}
+					final int bytesToParse = sslReadBuffer.position();
 					sslReadBuffer.flip();
-					final SSLEngineResult result = sslEngine.unwrap(sslReadBuffer, readBuffer);
-					logger.info("Called unwrap:{} {} {}", callbackBytesRead, readBuffer.position(), result);
-					runDelegatedTasks(result);
-					if (readBuffer.position() > 0) {
-						readBuffer.flip();
-						callback.readData(this, readBuffer);
-						readBuffer.clear();
+					boolean exitLoop = false;
+					while (exitLoop == false && !isReadBlocked) {
+
+						final SSLEngineResult result = sslEngine.unwrap(sslReadBuffer, decodedReadBuffer);
+						logger.debug("read bytes in:{} decoded:{} posn:{} UNWRAP:{}", callbackBytesRead,
+								decodedReadBuffer.position(), sslReadBuffer.position(), result);
+						manageHandshake(result.getHandshakeStatus());
+						switch (result.getStatus()) {
+						case BUFFER_OVERFLOW:
+							logger.info("Buffer BUFFER_OVERFLOW");
+							break;
+						case BUFFER_UNDERFLOW:
+							logger.info("Buffer BUFFER_UNDERFLOW sslReadBuffer.position:{} limit:{}",
+									sslReadBuffer.position(), sslReadBuffer.limit());
+							sslReadBuffer.compact();
+							logger.info("Buffer BUFFER_UNDERFLOW sslReadBuffer.position:{} limit:{}",
+									sslReadBuffer.position(), sslReadBuffer.limit());
+							exitLoop = true;
+							break;
+						case CLOSED:
+							close();
+							break;
+						case OK:
+							if (sslReadBuffer.position() == bytesToParse) {
+								// all decoded
+								exitLoop = true;
+								sslReadBuffer.clear();
+							}
+							if (decodedReadBuffer.position() > 0) {
+								decodedReadBuffer.flip();
+								callback.readData(this, decodedReadBuffer);
+								decodedReadBuffer.clear();
+							}
+							logger.info("okay: sslPosb:{} toal:{} read:{} exitLoop:{}", sslReadBuffer.position(),
+									bytesToParse, callbackBytesRead, exitLoop);
+							break;
+						default:
+						}
 					}
+
 					bytesRead += callbackBytesRead;
 				} while (callbackBytesRead > 0// no point if not reading data;
 						&& maxReadCounter-- > 0 //
@@ -475,6 +602,11 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				);
 				inReadWrite = false;
 				setKeyStatus();
+				logger.info("opRead.exit :{} sslPosn:{} sslRead:{}", sslEngine.getHandshakeStatus(),
+						sslReadBuffer.position(), sslReadBuffer.limit());
+			} catch (SSLException ssle) {
+				logger.error("SSLException :" + sslReadBuffer.position() + " callbackRead:" + callbackBytesRead, ssle);
+				close();
 			} catch (Exception e) {
 				if (isClosed) {
 					logger.warn("Already closed on read callback channel:" + channel);
@@ -484,6 +616,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 					close();
 				}
 			}
+
 		}
 
 		@Override
@@ -510,70 +643,82 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public long flush() throws IOException {
-
+			logger.info("flush start:" + isWriteBlocked + " " + isWriteBlocked());
+			if (isWriteBlocked) {
+				logger.info("write blocked, can not flush:" + toString());
+				return 0;
+			}
+			long thisFlush = 0;
+			assert (sslWriteBuffer.position() == 0);
 			inReadWrite = true;
 			if (logger.isDebugEnabled()) {
-				logger.debug(" flush id:{} posn:{}", id, writeBuffer.position());
+				logger.debug(" flush id:{} posn:{} limit:{} sslPosn:{}", id, writeBuffer.position(),
+						writeBuffer.limit(), sslWriteBuffer.position());
 			}
-			final int writeCount;
+
+			int writeCount = 0;
+			writeBuffer.flip();
+			boolean exitLoop = false;
 			try {
-
-				if (writeBuffer.position() == 0 && sslWriteBuffer.position() == 0) {
-					// nothing to do.
-					inReadWrite = false;
-					return 0;
-				}
-				final int sslRemaining;
-				final int plainRemaining;
-				if (writeBuffer.position() == 0 && sslWriteBuffer.position() > 0) {
-					// only existing data to send.
-					plainRemaining = 0;
-					sslRemaining = sslWriteBuffer.position();
-					sslWriteBuffer.flip();
-					writeCount = socketChannel.write(sslWriteBuffer);
-				} else {
-					writeBuffer.flip();
-					plainRemaining = writeBuffer.remaining();
-					final SSLEngineResult result = sslEngine.wrap(writeBuffer, sslWriteBuffer);
-					sslRemaining = sslWriteBuffer.position();
-					sslWriteBuffer.flip();
-					writeCount = socketChannel.write(sslWriteBuffer);
-					runDelegatedTasks(result);
-				}
-
-				if (writeCount == -1) {
-					close();
-					return -1;
-				} else if (writeCount == sslRemaining && plainRemaining == writeBuffer.position()) {
-					sslWriteBuffer.clear();
-					writeBuffer.clear();
-					if (isWriteBlocked) {
-						isWriteBlocked = false;
-						callback.writeUnblocked(this);
-					}
-				} else {
-					if (writeCount == sslRemaining && plainRemaining < writeBuffer.position()) {
-						sslWriteBuffer.clear();
-						writeBuffer.compact();
-					} else if (writeCount < sslRemaining && plainRemaining == writeBuffer.position()) {
+				while (!exitLoop) {
+					if (writeBuffer.position() == writeBuffer.limit()) {
+						logger.info("flush: finished, clear");
 						writeBuffer.clear();
-						sslWriteBuffer.compact();
-					} else {
-						// only wrote some data. block
-						writeBuffer.compact();
-						sslWriteBuffer.compact();
+						exitLoop = true;
+						break;
 					}
-					if (!isWriteBlocked) {
-						writeBlockStartAt = wait.currentTimeNanos;
-						isWriteBlocked = true;
-						callback.writeNowBlocked(this);
+					final int sslRemaining;
+					final int plainRemaining;
+					final SSLEngineResult result = sslEngine.wrap(writeBuffer, sslWriteBuffer);
+
+					switch (result.getStatus()) {
+					case BUFFER_OVERFLOW:
+						logger.info("buffer overflow");
+						sslWriteBuffer = ByteBuffer.wrap(new byte[sslWriteBuffer.array().length * 2]);
+						sslWriteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+						sslWriteBuffer.clear();
+						break;
+					case BUFFER_UNDERFLOW:
+						logger.info("flush underflow");
+						exitLoop = true;
+						break;
+					case CLOSED:
+						close();
+						exitLoop = true;
+						break;
+					case OK:
+						sslRemaining = sslWriteBuffer.position();
+						sslWriteBuffer.flip();
+						writeCount = socketChannel.write(sslWriteBuffer);
+						if (writeCount == -1) {
+							close();
+							return -1;
+						} else if (writeCount < sslRemaining) {
+							writeBlockStartAt = wait.currentTimeNanos;
+							isWriteBlocked = true;
+							sslWriteBuffer.compact();
+							exitLoop = true;
+							logger.info("flush:wrote some");
+						} else if (writeCount == sslRemaining) {
+							sslWriteBuffer.clear();
+							logger.info("flush, wrote all writeBuffer:{} {}", writeBuffer.position(),
+									writeBuffer.limit());
+						}
+						thisFlush += writeCount;
+						break;
+
+					default:
+						logger.error("unknown type:" + result);
 					}
 				}
-				bytesWritten += writeCount;
+				bytesWritten += thisFlush;
 				flushCount++;
 				inReadWrite = false;
 				setKeyStatus();
-				return writeCount;
+				logger.info("flush write:{} thisFlush:{} total:{} count:{}", writeCount, thisFlush, bytesWritten,
+						flushCount);
+				return thisFlush;
+
 			} catch (IOException ioe) {
 				if (isClosed) {
 					logger.warn("calling flush on already closed channel:" + socketChannel);
@@ -610,11 +755,12 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				}
 			}
 			if (currentOps == futureOps) {
-
+				// nothing doing
 			} else {
+				// has changed. lets set it.
 				sk.interestOps(futureOps);
 			}
-
+			// logger.debug("setKeyStatus:" + futureOps);
 		}
 
 		@Override
@@ -637,7 +783,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public void close() {
-			logger.info("Closing local:{} remote:{}", localAddress, remoteAddress);
+			logger.info("Closing local:{} remote:{} sslC:{}", localAddress, remoteAddress, sslc);
 
 			if (isClosed) {
 				logger.info("Already closed");
@@ -715,6 +861,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public void blockRead() {
+			logger.info("block read");
 			if (isReadBlocked) {
 				return;
 			}

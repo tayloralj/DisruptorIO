@@ -137,7 +137,7 @@ public class SSLConnectionTest {
 
 	// runs on the main thread
 	private void testFastServer(final long toSend, final long messageratePerSecond, final long readRatePerSecond,
-			final long writeRatePerSecond, int clients, boolean lossy) throws Exception {
+			final long writeRatePerSecond, final int clients, final boolean lossy) throws Exception {
 		try {
 			logger.info("Disruptor creating new disruptor for this context. toSend:{} rateAt:{}", toSend,
 					messageratePerSecond);
@@ -328,7 +328,7 @@ public class SSLConnectionTest {
 		final boolean lossy = false;
 		handlers = new ServerConnectionHelper[] {
 				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/test/client.jks",
-						"resources/test/client.truststore", "password", true), lossy, null) };
+						"resources/test/client.truststore", "password", true), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -336,14 +336,14 @@ public class SSLConnectionTest {
 	@Test
 	public void testServerConnectionLossy() throws Exception {
 		final long toSend = 20_000_000L;
-		final long messageratePerSecond = 100;
+		final long messageratePerSecond = 100000;
 		final long readRatePerSecond = 100L;
 		final long writeRatePerSecond = 100L;
 		final int clientCount = 1;
-		final boolean lossy = true;
+		final boolean lossy = false;
 		handlers = new ServerConnectionHelper[] {
 				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
-						"resources/client.truststore", "password", true), lossy, null) };
+						"resources/client.truststore", "password", true), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -357,7 +357,7 @@ public class SSLConnectionTest {
 		final boolean lossy = false;
 		handlers = new ServerConnectionHelper[] {
 				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/test/client.jks",
-						"resources/test/client.truststore", "password", true), lossy, null) };
+						"resources/test/client.truststore", "password", true), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -371,7 +371,7 @@ public class SSLConnectionTest {
 		final boolean lossy = true;
 		handlers = new ServerConnectionHelper[] {
 				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/test/client.jks",
-						"resources/test/client.truststore", "password", true), lossy, null) };
+						"resources/test/client.truststore", "password", true), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -385,7 +385,7 @@ public class SSLConnectionTest {
 		final boolean lossy = false;
 		handlers = new ServerConnectionHelper[] {
 				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/test/client.jks",
-						"resources/test/client.truststore", "password", true), lossy, null) };
+						"resources/test/client.truststore", "password", true), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -399,7 +399,7 @@ public class SSLConnectionTest {
 		final boolean lossy = true;
 		handlers = new ServerConnectionHelper[] {
 				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/test/client.jks",
-						"resources/test/client.truststore", "password", true), lossy, null) };
+						"resources/test/client.truststore", "password", true), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}

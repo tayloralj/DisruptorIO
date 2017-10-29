@@ -117,12 +117,15 @@ public class SSLConnectionTest {
 		} catch (Exception e) {
 			logger.info("Error closing nioWait", e);
 		}
-		for (int a = 0; a < handlers.length; a++) {
-			handlers[a].close();
-			handlers[a] = null;
+		if (handlers != null) {
+			for (int a = 0; a < handlers.length; a++) {
+				if (handlers[a] != null) {
+					handlers[a].close();
+				}
+				handlers[a] = null;
+			}
+			handlers = null;
 		}
-		handlers = null;
-
 		threadFactoryServer = null;
 
 		disruptorClient.shutdown();
@@ -171,6 +174,19 @@ public class SSLConnectionTest {
 			final long startTimeNanos = System.nanoTime() - 1;
 			int b = 0;
 			final RingBuffer<TestEvent> rb = disruptorServer.getRingBuffer();
+			boolean connected = false;
+			while (!connected) {
+				connected = true;
+
+				for (int a = 0; a < tc.clients.length; a++) {
+					if (false == tc.clients[a].isConnected()) {
+						connected = false;
+					}
+				}
+				Assert.assertThat("not  connected in time", System.nanoTime(),
+						Matchers.lessThan(startTimeNanos + TimeUnit.MILLISECONDS.toNanos(500)));
+			}
+logger.info("All connected");
 			while (actualMessageSendCount < toSend) {
 				Assert.assertThat(handlers[0].isClosed(), Is.is(false));
 

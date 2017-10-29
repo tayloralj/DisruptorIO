@@ -30,6 +30,7 @@ import com.ajt.disruptorIO.NIOWaitStrategy.TimerCallback;
 import com.ajt.disruptorIO.NIOWaitStrategy.TimerHandler;
 import com.lmax.disruptor.collections.Histogram;
 
+/** simple class to handle the connection lifecycle in tests */
 class ClientConnectionHelper implements SenderCallback {
 	/**
 	 * 
@@ -88,10 +89,15 @@ class ClientConnectionHelper implements SenderCallback {
 
 	}
 
+	boolean isConnected=false;
+	public boolean isConnected() {
+		return isConnected;
+	}
 	@Override
 	public void connected(final ConnectionHelper.SenderCallin callin) {
 
 		this.callin = callin;
+		isConnected=true;
 		// start sending own data to get echo'd back
 		timerHandler.fireIn(0);
 		startTimeNano = timerHandler.currentNanoTime();
@@ -205,6 +211,7 @@ class ClientConnectionHelper implements SenderCallback {
 		if (isClosed) {
 			return;
 		}
+		isConnected=false;
 		isClosed = true;
 		timerHandler.cancelTimer();
 		logger.info(

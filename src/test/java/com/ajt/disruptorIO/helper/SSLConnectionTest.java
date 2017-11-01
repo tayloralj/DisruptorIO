@@ -355,10 +355,10 @@ public class SSLConnectionTest {
 
 	@Test
 	public void testServerConnectionLossy() throws Exception {
-		final long toSend = 200_0000L;
+		final long toSend = 20_000000L;
 		final long messageratePerSecond = 1000000;
-		final long readRatePerSecond = 10000L;
-		final long writeRatePerSecond = 1000L;
+		final long readRatePerSecond = 1000000L;
+		final long writeRatePerSecond = 100000L;
 		final int clientCount = 1;
 		final boolean lossy = true;
 		handlers = new ServerConnectionHelper[] {

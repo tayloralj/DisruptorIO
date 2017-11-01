@@ -314,8 +314,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 					+ " opWriteCallback:" + opWriteCallback//
 					+ " messageSendCount:" + messageSendCount//
 					+ " flushCount:" + flushCount//
-					+ " sslWriteBufferPositon:" + sslWriteBuffer.position()//
-					+ " writeBuffer:" + writeBuffer.position();
+					+ " sslLim.ps:" + sslWriteBuffer.position()//
+					+ " sslLim:" + sslWriteBuffer.limit()//
+					+ " writeBuffer.posn:" + writeBuffer.position()//
+					+ " wteBf.lim:" + writeBuffer.limit();
 
 		}
 
@@ -461,7 +463,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		}
 
 		@Override
-		public void opWrite(final SelectableChannel channel, long currentTimeNanos) {
+		public void opWrite(final SelectableChannel channel, final long currentTimeNanos) {
 			logger.info("opWrite start");
 
 			opWriteCallback++;
@@ -475,16 +477,36 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				}
 
 				// only flush the ssl write buffer
-				final int remainingToWrite = sslWriteBuffer.limit();
+				final int remainingToWrite = sslWriteBuffer.position();
+				sslWriteBuffer.flip();
 				final int written = socketChannel.write(sslWriteBuffer);
-				if (written == remainingToWrite) {
+				if (written == -1) {
+					logger.error("closed connnection on opWrite");
+					close();
+					inReadWrite = false;
+					return;
+				} else if (written < remainingToWrite) {
+					bytesWritten += written;
+					logger.info(
+							"opWrite partial write written:{} totalWrite:{} originalTarget:{} sslWrite.posn:{} lim:{}",
+							written, bytesWritten, remainingToWrite, sslWriteBuffer.position(), sslWriteBuffer.limit());
+					// still blocked
+					sslWriteBuffer.compact();
+
+				} else if (written == remainingToWrite) {
+					bytesWritten += written;
 					sslWriteBuffer.clear();
 					if (writeBuffer.position() > 0) {
 						// may block again.
+						isWriteBlocked = false;
 						logger.info("opWrite still data to flush:" + toString());
 						flush();
 						logger.info("opWrite flush completed:" + toString());
-
+						if (isWriteBlocked == false) {
+							logger.info("opWrite now unblocked");
+							writeBlockStartAt = 0;
+							callback.writeUnblocked(this);
+						}
 					} else {
 						if (potentiallUnblockWrite) {
 							// unblock
@@ -494,8 +516,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 						}
 					}
 				} else {
-					// still blocked
-					sslWriteBuffer.compact();
+					logger.info("sdsd");
 				}
 
 			} catch (Exception e) {
@@ -511,6 +532,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		@Override
 		public void opRead(final SelectableChannel channel, final long currentTimeNanos) {
 			opReadCallback++;
+			int bytesToParse = 0;
 			if (isReadBlocked) {
 				logger.warn("got read callback when read blocked " + this.toString());
 				// odd.
@@ -534,7 +556,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 						maxReadCounter = 0;
 						break;
 					}
-					final int bytesToParse = sslReadBuffer.position();
+					bytesToParse = sslReadBuffer.position();
 					sslReadBuffer.flip();
 					boolean exitLoop = false;
 					while (exitLoop == false && !isReadBlocked) {
@@ -547,11 +569,13 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 						manageHandshake(result.getHandshakeStatus());
 						switch (result.getStatus()) {
 						case BUFFER_OVERFLOW:
-							logger.info("Buffer BUFFER_OVERFLOW");
+							logger.error("Buffer BUFFER_OVERFLOW");
 							break;
 						case BUFFER_UNDERFLOW:
-							logger.info("Buffer BUFFER_UNDERFLOW sslReadBuffer.position:{} limit:{}",
-									sslReadBuffer.position(), sslReadBuffer.limit());
+							logger.info(
+									"Buffer BUFFER_UNDERFLOW sslReadBuffer.position:{} limit:{} readBytes:{} decryt:{}",
+									sslReadBuffer.position(), sslReadBuffer.limit(), bytesToParse,
+									decodedReadBuffer.position());
 							sslReadBuffer.compact();
 							logger.info("Buffer BUFFER_UNDERFLOW after compact sslReadBuffer.position:{} limit:{}",
 									sslReadBuffer.position(), sslReadBuffer.limit());
@@ -591,7 +615,9 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 					logger.trace("opRead.exit status:{} ", this.toString());
 				}
 			} catch (SSLException ssle) {
-				logger.error("SSLException :" + sslReadBuffer.position() + " callbackRead:" + callbackBytesRead, ssle);
+				logger.error("SSLException sslReadPosition:" + sslReadBuffer.position() + " sslReadLim:"
+						+ sslReadBuffer.limit() + " callbackRead:" + callbackBytesRead + " bytesToParse:"
+						+ bytesToParse, ssle);
 				close();
 			} catch (Exception e) {
 				if (isClosed) {
@@ -656,6 +682,12 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 						if (logger.isTraceEnabled()) {
 							logger.trace("flush: finished, clear");
 						}
+						if (isWriteBlocked) {
+							logger.info("flush. writeUnblocked");
+							writeBlockStartAt = 0;
+							isWriteBlocked = false;
+							callback.writeUnblocked(this);
+						}
 						writeBuffer.clear();
 						exitLoop = true;
 						break;
@@ -687,19 +719,17 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 							close();
 							return -1;
 						} else if (writeCount < sslRemaining) {
+							logger.info(
+									"flush:wrote some, still blocked writeCount:{} pre.posn:{} pre.lim:{} ssl.pos:{} ssl.lim:{}",
+									writeCount, writeBuffer.position(), writeBuffer.limit(), sslWriteBuffer.position(),
+									sslWriteBuffer.limit());
 							writeBlockStartAt = wait.currentTimeNanos;
 							isWriteBlocked = true;
 							sslWriteBuffer.compact();
+							writeBuffer.compact();
 							exitLoop = true;
-							logger.info("flush:wrote some");
 						} else if (writeCount == sslRemaining) {
 							sslWriteBuffer.clear();
-							if (isWriteBlocked) {
-								logger.info("flush. writeUnblocked");
-								writeBlockStartAt = 0;
-								isWriteBlocked = false;
-								callback.writeUnblocked(this);
-							}
 							if (logger.isTraceEnabled()) {
 								logger.trace("flush, wrote all writeBuffer:{} {}", writeBuffer.position(),
 										writeBuffer.limit());

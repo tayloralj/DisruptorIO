@@ -18,6 +18,7 @@ import java.net.SocketAddress;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -89,8 +90,9 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 					}
 				}
 			} catch (Exception e) {
-				Assert.fail("Error in test" + e);
 				close();
+				Assert.fail("Error in test" + e);
+			
 			}
 			break;
 
@@ -132,7 +134,8 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		public void connected(final ConnectionHelper.SenderCallin callin) {
 			logger.info("Connected callin:{}", callin);
 			remoteAddress = callin.getRemoteAddress();
-			for (int a = 0; a < ecc.length; a++) {
+			boolean matched = false;
+			for (int a = 0; a < ecc.length && !matched; a++) {
 				if (ecc[a] == null) {
 
 					@SuppressWarnings("resource")
@@ -140,15 +143,18 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 							callin, a, coalsce);
 					callin.setId(a);
 					ecc[a] = escc;
+					ecc[a].startTimeNano = System.nanoTime();
+
+					matched = true;
 					break;
 				}
-				if (a == ecc.length - 1) {
-					try {
-						logger.error("Error could not find empty slot. closing");
-						callin.close();
-					} catch (Exception e) {
+			}
+			if (!matched) {
+				try {
+					logger.error("Error could not find empty slot. closing");
+					callin.close();
+				} catch (Exception e) {
 
-					}
 				}
 			}
 
@@ -168,8 +174,10 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 
 		@Override
 		public void closed(final ConnectionHelper.SenderCallin callin) {
+
 			logger.info("closed callin:{}", callin);
 			if (ecc[callin.getId()] != null) {
+
 				ecc[callin.getId()].close();
 			}
 		}
@@ -204,11 +212,11 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		private final ConnectionHelper.SenderCallin serverCallin;
 		private final int id;
 
-		private long totalRead = 0;
+		private long totalBytesRead = 0;
 
 		private long messageReadCount = 0;
 		private long readSignalCount = 0;
-		private long totalWriteSocket = 0;
+		private long totalBytesWritten = 0;
 		private long writeSignalCount = 0;
 		private long writeCount = 0;
 
@@ -223,8 +231,11 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		private final Histogram propHisto = TestEvent.getHisto();
 		private final boolean coalsce;
 		private long dropped = 0;
+		private long startTimeNano = 0;
+		private long closeTimeNano = 0;
 
-		EstablishedServerConnectionCallback(final ConnectionHelper.SenderCallin sc, final int id,
+		EstablishedServerConnectionCallback(final ConnectionHelper.SenderCallin sc, //
+				final int id, //
 				final boolean coalsce) {
 			this.serverCallin = sc;
 			this.id = id;
@@ -241,7 +252,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 				if (serverCallin.bytesInBuffer() > 0) {
 					final long bytesWritten = serverCallin.flush();
 					if (bytesWritten > 0) {
-						totalWriteSocket += bytesWritten;
+						totalBytesWritten += bytesWritten;
 					}
 					writeSignalCount++;
 
@@ -262,21 +273,26 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 					}
 					dropped++;
 				} else {
+					long errorAt = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1);
 					// block writing until data is sent to client
 					while (serverCallin.bufferRemaining() < event.getLength()) {
 						final long written = serverCallin.flush();
-
+						if (System.nanoTime() > errorAt) {
+							logger.error("Error timed out. dropping");
+							dropped++;
+							break;
+						}
 					}
 
 				}
 			} else {
-				totalWriteSocket += serverCallin.sendMessage(event.data, 0, event.getLength());
+				totalBytesWritten += serverCallin.sendMessage(event.data, 0, event.getLength());
 				writeSignalCount++;
 			}
 			if (endOfBatch) {
 				// change to only flush on end of batch.
 				endOfBatchCount++;
-				totalWriteSocket += serverCallin.flush();
+				totalBytesWritten += serverCallin.flush();
 				writeCount++;
 			}
 		}
@@ -287,6 +303,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 				return;
 			}
 			closed = true;
+			closeTimeNano = System.nanoTime();
 			logger.info("id:{} Closing Server dropped:{}"//
 					+ "\n\tCallin:{}"//
 					+ "\n\tREAD_SERVER: totalBytesRead:{} messageReadCount:{} readSignalCount:{}"//
@@ -294,10 +311,16 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 					+ "\n\tBATCH: BatchCound:{} EndOfBatch:{} "//
 					+ "\n\tHISTO: count:{} hist:{}", //
 					id, dropped, serverCallin, //
-					totalRead, messageReadCount, readSignalCount, //
-					totalWriteSocket, writeSignalCount, writeCount, //
+					totalBytesRead, messageReadCount, readSignalCount, //
+					totalBytesWritten, writeSignalCount, writeCount, //
 					messageCount, endOfBatchCount, //
 					propHisto.getCount(), TestEvent.toStringHisto(propHisto));
+
+			logger.info("SERVER THROUGHPUT ID:{} Read(mbit):{} Write(mbit):{} connectedFor(ms):{}", //
+					id, //
+					totalBytesRead * 8000 / (closeTimeNano - startTimeNano), //
+					totalBytesWritten * 8000 / (closeTimeNano - startTimeNano), //
+					TimeUnit.NANOSECONDS.toMillis(closeTimeNano - startTimeNano));
 
 			try {
 				serverCallin.close();
@@ -313,7 +336,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 			// readData.limit());
 			readSignalCount++;
 			final int bytesRead = readData.remaining();
-			totalRead += bytesRead;
+			totalBytesRead += bytesRead;
 			// logger.info("Read:" + read);
 			if (readData.position() > readBuffer.remaining()) {
 				logger.error("Error not enough space {} {} {} {}", readBuffer.position(), readBuffer.limit(),

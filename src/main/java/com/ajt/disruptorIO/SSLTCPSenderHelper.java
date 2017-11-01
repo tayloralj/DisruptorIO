@@ -327,34 +327,11 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			return counter;
 		}
 
-		private void runDelegatedTasks(final SSLEngineResult result) throws Exception {
-			logger.debug("run delegatedTaks result:{} status:{}", result, sslEngine.getHandshakeStatus());
-
-			switch (result.getStatus()) {
-			case BUFFER_OVERFLOW:
-				logger.info("STATUS: BUFFER_OVERFLOW");
-				break;
-			case BUFFER_UNDERFLOW:
-				logger.info("STATUS: BUFFER_UNDERFLOW");
-				break;
-			case CLOSED:
-				logger.info("STATUS: CLOSED ssl session closed:{}", result);
-				close();
-				break;
-			case OK:
-				logger.info("STATUS: OKAY");
-				break;
-			default:
-				logger.error("Error unknown status " + result.getStatus());
-			}
-		}
-
 		void manageHandshake(final HandshakeStatus startStatus) throws Exception {
 
 			switch (startStatus) {
 			case FINISHED:
 				logger.info("WRAP FINISHED Handshake completed:" + startStatus);
-				callback.connected(this);
 
 				isWriteBlocked = false;
 				isReadBlocked = false;
@@ -410,10 +387,9 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				break;
 
 			case NOT_HANDSHAKING:
-				logger.info("Not handshaking");
 				break;
 			default:
-				logger.error("handskare status:" + startStatus);
+				logger.error("handskare status unknown:" + startStatus);
 			}
 
 		}
@@ -486,28 +462,36 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public void opWrite(final SelectableChannel channel, long currentTimeNanos) {
-			logger.info("opWrite start" );
+			logger.info("opWrite start");
 
 			opWriteCallback++;
 			inReadWrite = true;
 			try {
+				final boolean potentiallUnblockWrite;
+				if (isWriteBlocked) {
+					potentiallUnblockWrite = true;
+				} else {
+					potentiallUnblockWrite = false;
+				}
+
 				// only flush the ssl write buffer
 				final int remainingToWrite = sslWriteBuffer.limit();
 				final int written = socketChannel.write(sslWriteBuffer);
 				if (written == remainingToWrite) {
 					sslWriteBuffer.clear();
-					isWriteBlocked = false;
 					if (writeBuffer.position() > 0) {
 						// may block again.
-						logger.info("opWrite still data to flush:"+toString());
+						logger.info("opWrite still data to flush:" + toString());
 						flush();
-						logger.info("opWrite flush completed:"+toString());
-						
-					}
-					if (!isWriteBlocked) {
-						// unblock
-						writeBlockStartAt=0;
-						callback.writeUnblocked(this);
+						logger.info("opWrite flush completed:" + toString());
+
+					} else {
+						if (potentiallUnblockWrite) {
+							// unblock
+							writeBlockStartAt = 0;
+							isWriteBlocked = false;
+							callback.writeUnblocked(this);
+						}
 					}
 				} else {
 					// still blocked
@@ -532,7 +516,6 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				// odd.
 				return;
 			}
-			logger.info("opRead");
 			decodedReadBuffer.clear();
 			inReadWrite = true;
 			int callbackBytesRead = -1;
@@ -541,9 +524,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				int maxReadCounter = 10;
 				do {
 
-					logger.info("opRead posn:{}", sslReadBuffer.position());
 					callbackBytesRead = socketChannel.read(sslReadBuffer);
-					logger.info("opRead posn:{}", sslReadBuffer.position());
 					if (callbackBytesRead == -1) {
 						close();
 						inReadWrite = false;
@@ -559,8 +540,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 					while (exitLoop == false && !isReadBlocked) {
 
 						final SSLEngineResult result = sslEngine.unwrap(sslReadBuffer, decodedReadBuffer);
-						logger.debug("read bytes in:{} decoded:{} posn:{} UNWRAP:{}", callbackBytesRead,
-								decodedReadBuffer.position(), sslReadBuffer.position(), result);
+						if (logger.isTraceEnabled()) {
+							logger.trace("read bytes in:{} decoded:{} posn:{} UNWRAP:{}", callbackBytesRead,
+									decodedReadBuffer.position(), sslReadBuffer.position(), result);
+						}
 						manageHandshake(result.getHandshakeStatus());
 						switch (result.getStatus()) {
 						case BUFFER_OVERFLOW:
@@ -570,7 +553,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 							logger.info("Buffer BUFFER_UNDERFLOW sslReadBuffer.position:{} limit:{}",
 									sslReadBuffer.position(), sslReadBuffer.limit());
 							sslReadBuffer.compact();
-							logger.info("Buffer BUFFER_UNDERFLOW sslReadBuffer.position:{} limit:{}",
+							logger.info("Buffer BUFFER_UNDERFLOW after compact sslReadBuffer.position:{} limit:{}",
 									sslReadBuffer.position(), sslReadBuffer.limit());
 							exitLoop = true;
 							break;
@@ -588,8 +571,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 								callback.readData(this, decodedReadBuffer);
 								decodedReadBuffer.clear();
 							}
-							logger.info("okay: sslPosb:{} toal:{} read:{} exitLoop:{}", sslReadBuffer.position(),
-									bytesToParse, callbackBytesRead, exitLoop);
+							if (logger.isTraceEnabled()) {
+								logger.trace("okay: sslPosb:{} toal:{} read:{} exitLoop:{}", sslReadBuffer.position(),
+										bytesToParse, callbackBytesRead, exitLoop);
+							}
 							break;
 						default:
 						}
@@ -602,8 +587,9 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				);
 				inReadWrite = false;
 				setKeyStatus();
-				logger.info("opRead.exit :{} sslPosn:{} sslRead:{}", sslEngine.getHandshakeStatus(),
-						sslReadBuffer.position(), sslReadBuffer.limit());
+				if (logger.isTraceEnabled()) {
+					logger.trace("opRead.exit status:{} ", this.toString());
+				}
 			} catch (SSLException ssle) {
 				logger.error("SSLException :" + sslReadBuffer.position() + " callbackRead:" + callbackBytesRead, ssle);
 				close();
@@ -643,16 +629,21 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public long flush() throws IOException {
-			logger.info("flush start:" + isWriteBlocked + " " + isWriteBlocked());
+			if (logger.isTraceEnabled()) {
+				logger.trace("flush start:" + isWriteBlocked + " " + isWriteBlocked());
+			}
+			if (isClosed) {
+				throw new IOException("Error can not flush when closed");
+			}
 			if (isWriteBlocked) {
-				logger.info("write blocked, can not flush:" + toString());
+				logger.debug("write blocked, can not flush:" + toString());
 				return 0;
 			}
 			long thisFlush = 0;
 			assert (sslWriteBuffer.position() == 0);
 			inReadWrite = true;
-			if (logger.isDebugEnabled()) {
-				logger.debug(" flush id:{} posn:{} limit:{} sslPosn:{}", id, writeBuffer.position(),
+			if (logger.isTraceEnabled()) {
+				logger.trace(" flush id:{} posn:{} limit:{} sslPosn:{}", id, writeBuffer.position(),
 						writeBuffer.limit(), sslWriteBuffer.position());
 			}
 
@@ -662,7 +653,9 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			try {
 				while (!exitLoop) {
 					if (writeBuffer.position() == writeBuffer.limit()) {
-						logger.info("flush: finished, clear");
+						if (logger.isTraceEnabled()) {
+							logger.trace("flush: finished, clear");
+						}
 						writeBuffer.clear();
 						exitLoop = true;
 						break;
@@ -673,7 +666,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 					switch (result.getStatus()) {
 					case BUFFER_OVERFLOW:
-						logger.info("buffer overflow");
+						logger.error("buffer overflow");
 						sslWriteBuffer = ByteBuffer.wrap(new byte[sslWriteBuffer.array().length * 2]);
 						sslWriteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 						sslWriteBuffer.clear();
@@ -701,8 +694,16 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 							logger.info("flush:wrote some");
 						} else if (writeCount == sslRemaining) {
 							sslWriteBuffer.clear();
-							logger.info("flush, wrote all writeBuffer:{} {}", writeBuffer.position(),
-									writeBuffer.limit());
+							if (isWriteBlocked) {
+								logger.info("flush. writeUnblocked");
+								writeBlockStartAt = 0;
+								isWriteBlocked = false;
+								callback.writeUnblocked(this);
+							}
+							if (logger.isTraceEnabled()) {
+								logger.trace("flush, wrote all writeBuffer:{} {}", writeBuffer.position(),
+										writeBuffer.limit());
+							}
 						}
 						thisFlush += writeCount;
 						break;
@@ -715,8 +716,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				flushCount++;
 				inReadWrite = false;
 				setKeyStatus();
-				logger.info("flush write:{} thisFlush:{} total:{} count:{}", writeCount, thisFlush, bytesWritten,
-						flushCount);
+				if (logger.isTraceEnabled()) {
+					logger.trace("flush write:{} thisFlush:{} total:{} count:{}", writeCount, thisFlush, bytesWritten,
+							flushCount);
+				}
 				return thisFlush;
 
 			} catch (IOException ioe) {
@@ -734,9 +737,11 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		}
 
+		int currentOps;
+
 		/** set read/write status in case more data to be flushed */
 		private void setKeyStatus() {
-			final int currentOps = sk.interestOps();
+			currentOps = sk.interestOps();
 			final int futureOps;
 			if (isWriteBlocked) {
 				if (isReadBlocked) {
@@ -759,6 +764,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			} else {
 				// has changed. lets set it.
 				sk.interestOps(futureOps);
+				currentOps = futureOps;
 			}
 			// logger.debug("setKeyStatus:" + futureOps);
 		}

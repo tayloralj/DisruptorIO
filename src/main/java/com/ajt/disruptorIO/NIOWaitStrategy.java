@@ -189,8 +189,8 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 					}
 
 				} else {
-					logger.info("Invalid key in selection key:{} interest:{} Objec:{}", key, key.interestOps(),
-							key.attachment());
+
+					logger.info("Invalid key in selection key:{} ", key);
 					try {
 						key.cancel();
 					} catch (Exception e) {

@@ -305,7 +305,7 @@ public class NIOWaitSelector2NIO2 {
 							clients[c].bytesReadCallback, //
 							clients[c].bytesReadCount, //
 							clients[c].writeShouldBeAtLeast, // write
-							clients[c].totalWriteSocket); // written
+							clients[c].bytesWritten); // written
 					clients[c].close();
 					clients[c] = null;
 				}

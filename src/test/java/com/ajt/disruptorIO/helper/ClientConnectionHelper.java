@@ -46,7 +46,7 @@ class ClientConnectionHelper implements SenderCallback {
 	long messageReadCount = 0;
 	long rttReadCount = 0;
 	long bytesReadCount = 0;
-	long totalWriteSocket = 0;
+	long bytesWritten = 0;
 	private long writeSignalCount = 0;
 	private long writeCount = 0;
 
@@ -60,6 +60,7 @@ class ClientConnectionHelper implements SenderCallback {
 	final TimerHandler timerHandler;
 	final TimerSenderCallback callback;
 	long startTimeNano = 0;
+	long closeTimeNano = 0;
 	boolean blocked = false;
 	long slowTimer = 100 * 1000000;
 	long fastTimer = 500;
@@ -70,7 +71,8 @@ class ClientConnectionHelper implements SenderCallback {
 	private long startBlockAt = 0;
 	private final long writeRatePerSecond;
 
-	public ClientConnectionHelper(final long writeRatePerSecond, final int id, final SocketAddress sa, final NIOWaitStrategy nioWait) {
+	public ClientConnectionHelper(final long writeRatePerSecond, final int id, final SocketAddress sa,
+			final NIOWaitStrategy nioWait) {
 		this.writeRatePerSecond = writeRatePerSecond;
 		this.id = id;
 
@@ -89,15 +91,17 @@ class ClientConnectionHelper implements SenderCallback {
 
 	}
 
-	boolean isConnected=false;
+	boolean isConnected = false;
+
 	public boolean isConnected() {
 		return isConnected;
 	}
+
 	@Override
 	public void connected(final ConnectionHelper.SenderCallin callin) {
 
 		this.callin = callin;
-		isConnected=true;
+		isConnected = true;
 		// start sending own data to get echo'd back
 		timerHandler.fireIn(0);
 		startTimeNano = timerHandler.currentNanoTime();
@@ -211,7 +215,8 @@ class ClientConnectionHelper implements SenderCallback {
 		if (isClosed) {
 			return;
 		}
-		isConnected=false;
+		closeTimeNano = timerHandler.currentNanoTime();
+		isConnected = false;
 		isClosed = true;
 		timerHandler.cancelTimer();
 		logger.info(
@@ -221,8 +226,14 @@ class ClientConnectionHelper implements SenderCallback {
 						+ "\n\t Propogate time Histo:{} {}"//
 						+ "\n\t RTT time Histo:{} {}",
 				id, bytesRead, messageCounter, messageReadCount, rttReadCount, //
-				totalWriteSocket, writeSignalCount, writeCount, propHisto.getCount(), //
+				bytesWritten, writeSignalCount, writeCount, propHisto.getCount(), //
 				TestEvent.toStringHisto(propHisto), rttHisto.getCount(), TestEvent.toStringHisto(rttHisto));
+		logger.info("THROUGHPUT ID:{} Read(mbit):{} Write(mbit):{} connectedFor(ms):{}", //
+				id, //
+				bytesRead * 8000 / (closeTimeNano - startTimeNano), //
+				bytesWritten * 8000 / (closeTimeNano - startTimeNano), //
+				TimeUnit.NANOSECONDS.toMillis(closeTimeNano - startTimeNano));
+
 		propHisto.clear();
 		rttHisto.clear();
 	}
@@ -240,7 +251,7 @@ class ClientConnectionHelper implements SenderCallback {
 
 				final long elapsed = currentNanoTime - startTimeNano;
 				boolean somethingWritten = false;
-				while (elapsed * writeRatePerSecond > totalWriteSocket * 1000000000L && !blocked) {
+				while (elapsed * writeRatePerSecond > bytesWritten * 1000000000L && !blocked) {
 
 					TestEvent.putIntToArray(writeBytes, TestEvent.Offsets.type,
 							TestEvent.MessageType.clientRequestMessage);
@@ -257,7 +268,7 @@ class ClientConnectionHelper implements SenderCallback {
 						break;
 					}
 					somethingWritten = true;
-					totalWriteSocket += couldSend;
+					bytesWritten += couldSend;
 					writeCount++;
 
 				}

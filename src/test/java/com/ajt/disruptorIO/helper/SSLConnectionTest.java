@@ -183,10 +183,10 @@ public class SSLConnectionTest {
 						connected = false;
 					}
 				}
-				Assert.assertThat("not  connected in time", System.nanoTime(),
-						Matchers.lessThan(startTimeNanos + TimeUnit.MILLISECONDS.toNanos(500)));
+				Assert.assertThat("not  connected in time", System.nanoTime(), Matchers
+						.lessThan(startTimeNanos + TimeUnit.MILLISECONDS.toNanos(300 + 200 * tc.clients.length)));
 			}
-logger.info("All connected");
+			logger.info("All connected");
 			while (actualMessageSendCount < toSend) {
 				Assert.assertThat(handlers[0].isClosed(), Is.is(false));
 
@@ -212,11 +212,14 @@ logger.info("All connected");
 						te.nanoSendTime = System.nanoTime();
 						rb.publish(sequenceNum);
 						actualMessageSendCount++;
+						Assert.assertThat(handlers[0].isClosed(), Is.is(false));
+
 					} catch (Exception ice) {
 						// land here if a lossy client
 					} finally {
 						// move onto next client
-						if (++b >= clients) {
+						b++;
+						if (b >= clients) {
 							b = 0;
 						}
 					}
@@ -239,6 +242,7 @@ logger.info("All connected");
 					break;
 				}
 			}
+
 			assertThat("Message count did not all get delivered by disruptor to client, slow or blocked client ? ",
 					handlers[0].counter.get(), Matchers.is(toSend));
 			nioWaitStrategyClient.getScheduledExecutor().execute(() -> {
@@ -325,7 +329,7 @@ logger.info("All connected");
 							clients[c].bytesReadCallback, //
 							clients[c].bytesReadCount, //
 							clients[c].writeShouldBeAtLeast, // write
-							clients[c].totalWriteSocket); // written
+							clients[c].bytesWritten); // written
 					clients[c].close();
 					clients[c] = null;
 				}
@@ -351,12 +355,12 @@ logger.info("All connected");
 
 	@Test
 	public void testServerConnectionLossy() throws Exception {
-		final long toSend = 20_000_000L;
-		final long messageratePerSecond = 100000;
-		final long readRatePerSecond = 100L;
-		final long writeRatePerSecond = 100L;
+		final long toSend = 200_0000L;
+		final long messageratePerSecond = 1000000;
+		final long readRatePerSecond = 10000L;
+		final long writeRatePerSecond = 1000L;
 		final int clientCount = 1;
-		final boolean lossy = false;
+		final boolean lossy = true;
 		handlers = new ServerConnectionHelper[] {
 				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
 						"resources/client.truststore", "password", true), lossy, null, clientCount) };

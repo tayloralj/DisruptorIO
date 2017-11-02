@@ -103,20 +103,16 @@ public class NIOWaitDisruptorTest {
 		LatencyTimer lt = new LatencyTimer();
 		lt.register(nioWaitStrategy);
 
-		RingBuffer<TestEvent> rb = disruptor.getRingBuffer();
-		long lastSequence = 0;
-		long endSequence = 0;
+		final RingBuffer<TestEvent> rb = disruptor.getRingBuffer();
+
 		long toSend = 200000;
 		for (int a = 0; a < toSend; a++) {
-			if (lastSequence == endSequence) {
-				endSequence = rb.next(1024);
-			}
+			final long seqNum = rb.next();
 			// Thread.sleep(20);
-			TestEvent te = rb.get(lastSequence);
+			TestEvent te = rb.get(seqNum);
 			te.seqNum = a;
-			rb.publish(lastSequence);
-			lastSequence++;
-			if ((lastSequence & 127) == 0) {
+			rb.publish(seqNum);
+			if ((seqNum & 127) == 0) {
 				Thread.sleep(1);
 			}
 		}
@@ -131,7 +127,7 @@ public class NIOWaitDisruptorTest {
 			}
 		}
 		assertThat(handlers[0].counter.get(), Matchers.is(toSend));
-	disruptor.shutdown();
+		disruptor.shutdown();
 
 	}
 

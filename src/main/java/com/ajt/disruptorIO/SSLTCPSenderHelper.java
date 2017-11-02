@@ -464,7 +464,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public void opWrite(final SelectableChannel channel, final long currentTimeNanos) {
-			logger.info("opWrite start");
+//			logger.info("opWrite start");
 
 			opWriteCallback++;
 			inReadWrite = true;
@@ -487,9 +487,9 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 					return;
 				} else if (written < remainingToWrite) {
 					bytesWritten += written;
-					logger.info(
-							"opWrite partial write written:{} totalWrite:{} originalTarget:{} sslWrite.posn:{} lim:{}",
-							written, bytesWritten, remainingToWrite, sslWriteBuffer.position(), sslWriteBuffer.limit());
+		//			logger.info(
+		//					"opWrite partial write written:{} totalWrite:{} originalTarget:{} sslWrite.posn:{} lim:{}",
+		//					written, bytesWritten, remainingToWrite, sslWriteBuffer.position(), sslWriteBuffer.limit());
 					// still blocked
 					sslWriteBuffer.compact();
 
@@ -499,11 +499,11 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 					if (writeBuffer.position() > 0) {
 						// may block again.
 						isWriteBlocked = false;
-						logger.info("opWrite still data to flush:" + toString());
+				//		logger.info("opWrite still data to flush:" + toString());
 						flush();
-						logger.info("opWrite flush completed:" + toString());
+				//		logger.info("opWrite flush completed:" + toString());
 						if (isWriteBlocked == false) {
-							logger.info("opWrite now unblocked");
+//							logger.info("opWrite now unblocked");
 							writeBlockStartAt = 0;
 							callback.writeUnblocked(this);
 						}
@@ -572,13 +572,13 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 							logger.error("Buffer BUFFER_OVERFLOW");
 							break;
 						case BUFFER_UNDERFLOW:
-							logger.info(
-									"Buffer BUFFER_UNDERFLOW sslReadBuffer.position:{} limit:{} readBytes:{} decryt:{}",
-									sslReadBuffer.position(), sslReadBuffer.limit(), bytesToParse,
-									decodedReadBuffer.position());
+//							logger.info(
+//									"Buffer BUFFER_UNDERFLOW sslReadBuffer.position:{} limit:{} readBytes:{} decryt:{}",
+//									sslReadBuffer.position(), sslReadBuffer.limit(), bytesToParse,
+//									decodedReadBuffer.position());
 							sslReadBuffer.compact();
-							logger.info("Buffer BUFFER_UNDERFLOW after compact sslReadBuffer.position:{} limit:{}",
-									sslReadBuffer.position(), sslReadBuffer.limit());
+//							logger.info("Buffer BUFFER_UNDERFLOW after compact sslReadBuffer.position:{} limit:{}",
+//									sslReadBuffer.position(), sslReadBuffer.limit());
 							exitLoop = true;
 							break;
 						case CLOSED:
@@ -662,7 +662,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				throw new IOException("Error can not flush when closed");
 			}
 			if (isWriteBlocked) {
-				logger.debug("write blocked, can not flush:" + toString());
+//				logger.debug("write blocked, can not flush:" + toString());
 				return 0;
 			}
 			long thisFlush = 0;
@@ -719,10 +719,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 							close();
 							return -1;
 						} else if (writeCount < sslRemaining) {
-							logger.info(
-									"flush:wrote some, still blocked writeCount:{} pre.posn:{} pre.lim:{} ssl.pos:{} ssl.lim:{}",
-									writeCount, writeBuffer.position(), writeBuffer.limit(), sslWriteBuffer.position(),
-									sslWriteBuffer.limit());
+//							logger.info(
+//									"flush:wrote some, still blocked writeCount:{} pre.posn:{} pre.lim:{} ssl.pos:{} ssl.lim:{}",
+//									writeCount, writeBuffer.position(), writeBuffer.limit(), sslWriteBuffer.position(),
+//									sslWriteBuffer.limit());
 							writeBlockStartAt = wait.currentTimeNanos;
 							isWriteBlocked = true;
 							sslWriteBuffer.compact();

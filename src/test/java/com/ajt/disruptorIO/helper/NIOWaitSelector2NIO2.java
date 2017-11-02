@@ -170,6 +170,20 @@ public class NIOWaitSelector2NIO2 {
 			final long startTimeNanos = System.nanoTime() - 1;
 			int b = 0;
 			final RingBuffer<TestEvent> rb = disruptorServer.getRingBuffer();
+			
+			boolean connected = false;
+			while (!connected) {
+				connected = true;
+
+				for (int a = 0; a < tc.clients.length; a++) {
+					if (false == tc.clients[a].isConnected()) {
+						connected = false;
+					}
+				}
+				Assert.assertThat("not  connected in time", System.nanoTime(), Matchers
+						.lessThan(startTimeNanos + TimeUnit.MILLISECONDS.toNanos(300 + 200 * tc.clients.length)));
+			}
+			logger.info("All connected");
 			while (actualMessageSendCount < toSend) {
 				final long currentTimeNanos = System.nanoTime();
 				final long elapsed = currentTimeNanos - startTimeNanos;

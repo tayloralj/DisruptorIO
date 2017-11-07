@@ -232,12 +232,14 @@ public class SSLConnectionTest {
 	}
 
 	// runs on the main thread
-	private void testFastServer(final long toSend, final long messageratePerSecond, final long readRatePerSecond,
-			final long writeRatePerSecond, final int clients, final boolean lossy, final String cipher)
-			throws Exception {
+	private void testFastServer(final long messagesToSend, //
+			final long sendMessageRatePerSecond, //
+			final long readRatePerSecond, //
+			final long writeRatePerSecond, //
+			final int clients, final boolean lossy, final String cipher) throws Exception {
 		try {
-			logger.info("Disruptor creating new disruptor for this context. toSend:{} rateAt:{}", toSend,
-					messageratePerSecond);
+			logger.info("Disruptor creating new disruptor for this context. toSend:{} rateAt:{}", messagesToSend,
+					sendMessageRatePerSecond);
 
 			disruptorServer.start();
 
@@ -250,7 +252,7 @@ public class SSLConnectionTest {
 			}
 
 			// create a client set using the client disruptor
-			final TestEventClient tc = new TestEventClient(clients, writeRatePerSecond, readRatePerSecond,
+			final TestEventClient tc = new TestEventClient(clients, readRatePerSecond, writeRatePerSecond,
 					(InetSocketAddress) handlers[0].remoteAddress, nioWaitStrategyClient, cipher);
 			disruptorClient.handleEventsWith(new TestEventClient[] { tc });
 			disruptorClient.start();
@@ -281,13 +283,13 @@ public class SSLConnectionTest {
 				Assert.assertThat("not  connected in time", elapsed, Matchers.lessThan(300L + 200 * tc.clients.length));
 			}
 			logger.info("All connected");
-			while (actualMessageSendCount < toSend) {
+			while (actualMessageSendCount < messagesToSend) {
 				Assert.assertThat(handlers[0].isClosed(), Is.is(false));
 
 				final long currentTimeNanos = System.nanoTime();
 				final long elapsed = currentTimeNanos - startTimeNanos;
 				// control send rate
-				if (elapsed * messageratePerSecond > actualMessageSendCount * 1000000000L) {
+				if (elapsed * sendMessageRatePerSecond > actualMessageSendCount * 1000000000L) {
 
 					try {
 						if (lossy) {
@@ -331,14 +333,14 @@ public class SSLConnectionTest {
 			logger.info("Finished sending");
 			final long endTime = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1000);
 			while (System.nanoTime() < endTime) {
-				if (handlers[0].counter.get() == toSend) {
-					logger.info("completed :{}", toSend);
+				if (handlers[0].counter.get() == messagesToSend) {
+					logger.info("completed :{}", messagesToSend);
 					break;
 				}
 			}
 
 			assertThat("Message count did not all get delivered by disruptor to client, slow or blocked client ? ",
-					handlers[0].counter.get(), Matchers.is(toSend));
+					handlers[0].counter.get(), Matchers.is(messagesToSend));
 			nioWaitStrategyClient.getScheduledExecutor().execute(() -> {
 				logger.info("Closing client");
 				tc.close();
@@ -369,8 +371,8 @@ public class SSLConnectionTest {
 		long _currentTimeNanos = 0;
 
 		public TestEventClient(final int count, //
-				final long writeRatePerSecond, //
 				final long readRatePerSecond, //
+				final long writeRatePerSecond, //
 				final InetSocketAddress sa, //
 				final NIOWaitStrategy nioWait, //
 				final String cipher) throws Exception {
@@ -445,12 +447,12 @@ public class SSLConnectionTest {
 		sslContext = setupContext("password", "resources/client.jks", "resources/client.truststore");
 
 		final long toSend = 50_000_000L;
-		final long messageratePerSecond = 1_000_000_000L;
-		final long readRatePerSecond = 1_000_000_000L;
-		final long writeRatePerSecond = 1_000L;
+		final long messageratePerSecond = 1_000_000_000L; // high
+		final long readRatePerSecond = 1_000_000_000L; // high
+		final long writeRatePerSecond = 1_000L; //
 		final int clientCount = 5;
 		final boolean lossy = true;
-		String cph ="";
+		String cph = "";
 		// cph="TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA";
 		// cph = null;
 		SSLParameters sslP = SSLContext.getDefault().getSupportedSSLParameters();
@@ -461,7 +463,7 @@ public class SSLConnectionTest {
 			try {
 				setup();
 				long start = System.currentTimeMillis();
-				
+
 				sslP.setCipherSuites(new String[] { cph });
 				sslP.setUseCipherSuitesOrder(true);
 				SSLTCPSenderHelper sslTCP = new SSLTCPSenderHelper(nioWaitStrategyServer, sslContext, sslP);
@@ -472,10 +474,9 @@ public class SSLConnectionTest {
 						cph);
 				long finish = System.currentTimeMillis();
 				logger.info("SUCCESS took:" + (finish - start) + " cph:" + cph);
-			} catch (AssertionError |IllegalStateException ae) {
-				logger.error("ERROR FAILED " + cph,ae);
-			}
-			finally {
+			} catch (AssertionError | IllegalStateException ae) {
+				logger.error("ERROR FAILED " + cph, ae);
+			} finally {
 				teardown();
 			}
 		}

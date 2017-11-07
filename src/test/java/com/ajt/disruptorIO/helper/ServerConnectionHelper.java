@@ -234,7 +234,8 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		private long startTimeNano = 0;
 		private long closeTimeNano = 0;
 
-		EstablishedServerConnectionCallback(final ConnectionHelper.SenderCallin sc, //
+		EstablishedServerConnectionCallback(//
+				final ConnectionHelper.SenderCallin sc, //
 				final int id, //
 				final boolean coalsce) {
 			this.serverCallin = sc;
@@ -249,6 +250,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 
 		public void flush() throws IOException {
 			try {
+				// flush if needed.
 				if (serverCallin.bytesInBuffer() > 0) {
 					final long bytesWritten = serverCallin.flush();
 					if (bytesWritten > 0) {
@@ -274,13 +276,15 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 					}
 					dropped++;
 				} else {
-					long errorAt = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(5);
+					long errorAt = System.nanoTime() + TimeUnit.MICROSECONDS.toNanos(5);
 					// block writing until data is sent to client
 					while (serverCallin.bufferRemaining() < event.getLength()) {
 						final long written = serverCallin.flush();
 						flushed += written;
 						if (System.nanoTime() > errorAt) {
-							logger.error("Error timed out. dropping flushed:{}", flushed);
+							if (dropped % 1000 == 0) {
+								logger.error("Error timed out. dropping flushed:{} dropped:{}", flushed);
+							}
 							dropped++;
 							break;
 						}

@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
 import org.hamcrest.Matchers;
+import org.hamcrest.core.Is;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -27,7 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.ConnectionHelper;
 import com.ajt.disruptorIO.NIOWaitStrategy;
-import com.ajt.disruptorIO.TCPSenderHelper;
+import com.ajt.disruptorIO.SSLTCPSenderHelper;
 import com.ajt.disruptorIO.TestEvent;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.ExceptionHandler;
@@ -35,13 +36,13 @@ import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
 
-public class NIOWaitSelector2NIO2 {
+public class SSLConnectionProtocolTest {
 	static {
 		System.setProperty("org.apache.logging.log4j.simplelog.StatusLogger.level", "TRACE");
 		System.setProperty("org.apache.logging.log4j.level", "DEBUG");
 
 	}
-	private final Logger logger = LoggerFactory.getLogger(NIOWaitSelector2NIO2.class);
+	private final Logger logger = LoggerFactory.getLogger(SSLConnectionProtocolTest.class);
 	private ExceptionHandler<TestEvent> errorHandler;
 	private long sequenceNum = 0;
 	private Disruptor<TestEvent> disruptorServer;
@@ -116,12 +117,15 @@ public class NIOWaitSelector2NIO2 {
 		} catch (Exception e) {
 			logger.info("Error closing nioWait", e);
 		}
-		for (int a = 0; a < handlers.length; a++) {
-			handlers[a].close();
-			handlers[a] = null;
+		if (handlers != null) {
+			for (int a = 0; a < handlers.length; a++) {
+				if (handlers[a] != null) {
+					handlers[a].close();
+				}
+				handlers[a] = null;
+			}
+			handlers = null;
 		}
-		handlers = null;
-
 		threadFactoryServer = null;
 
 		disruptorClient.shutdown();
@@ -136,7 +140,7 @@ public class NIOWaitSelector2NIO2 {
 
 	// runs on the main thread
 	private void testFastServer(final long toSend, final long messageratePerSecond, final long readRatePerSecond,
-			final long writeRatePerSecond, int clients, boolean lossy) throws Exception {
+			final long writeRatePerSecond, final int clients, final boolean lossy) throws Exception {
 		try {
 			logger.info("Disruptor creating new disruptor for this context. toSend:{} rateAt:{}", toSend,
 					messageratePerSecond);
@@ -170,7 +174,6 @@ public class NIOWaitSelector2NIO2 {
 			final long startTimeNanos = System.nanoTime() - 1;
 			int b = 0;
 			final RingBuffer<TestEvent> rb = disruptorServer.getRingBuffer();
-
 			boolean connected = false;
 			while (!connected) {
 				connected = true;
@@ -180,11 +183,13 @@ public class NIOWaitSelector2NIO2 {
 						connected = false;
 					}
 				}
-				Assert.assertThat("not  connected in time", System.nanoTime(), Matchers
-						.lessThan(startTimeNanos + TimeUnit.MILLISECONDS.toNanos(300 + 200 * tc.clients.length)));
+				final long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTimeNanos);
+				Assert.assertThat("not  connected in time", elapsed, Matchers.lessThan(300L + 200 * tc.clients.length));
 			}
 			logger.info("All connected");
 			while (actualMessageSendCount < toSend) {
+				Assert.assertThat(handlers[0].isClosed(), Is.is(false));
+
 				final long currentTimeNanos = System.nanoTime();
 				final long elapsed = currentTimeNanos - startTimeNanos;
 				// control send rate
@@ -207,11 +212,14 @@ public class NIOWaitSelector2NIO2 {
 						te.nanoSendTime = System.nanoTime();
 						rb.publish(sequenceNum);
 						actualMessageSendCount++;
+						Assert.assertThat(handlers[0].isClosed(), Is.is(false));
+
 					} catch (Exception ice) {
 						// land here if a lossy client
 					} finally {
 						// move onto next client
-						if (++b >= clients) {
+						b++;
+						if (b >= clients) {
 							b = 0;
 						}
 					}
@@ -234,6 +242,7 @@ public class NIOWaitSelector2NIO2 {
 					break;
 				}
 			}
+
 			assertThat("Message count did not all get delivered by disruptor to client, slow or blocked client ? ",
 					handlers[0].counter.get(), Matchers.is(toSend));
 			nioWaitStrategyClient.getScheduledExecutor().execute(() -> {
@@ -269,12 +278,13 @@ public class NIOWaitSelector2NIO2 {
 				final long writeRatePerSecond, //
 				final long readRatePerSecond, //
 				final InetSocketAddress sa, //
-				final NIOWaitStrategy nioWait) {
+				final NIOWaitStrategy nioWait) throws Exception {
 			this.sa = sa;
 			this.count = count;
 			this.writeRatePerSecond = writeRatePerSecond;
 			this.readRatePerSecond = readRatePerSecond;
-			helper = new TCPSenderHelper(nioWait);
+			helper = new SSLTCPSenderHelper(nioWait, "resources/client.jks", "resources/client.truststore", "password",
+					false);
 			clients = new ClientConnectionHelper[count];
 			for (int a = 0; a < count; a++) {
 				clients[a] = new ClientConnectionHelper(writeRatePerSecond, a, sa, nioWait);
@@ -331,28 +341,30 @@ public class NIOWaitSelector2NIO2 {
 
 	@Test
 	public void testServerConnectionFull() throws Exception {
-		final long toSend = 20_000_000L;
+		final long toSend = 200_000_000L;
 		final long messageratePerSecond = 200_000_000L;
 		final long readRatePerSecond = 1_000000L;
 		final long writeRatePerSecond = 1_000000L;
 		final int clientCount = 2;
 		final boolean lossy = false;
 		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
+				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
+						"resources/client.truststore", "password", true), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
 
 	@Test
 	public void testServerConnectionLossy() throws Exception {
-		final long toSend = 20_000_000L;
-		final long messageratePerSecond = 200_000_000L;
-		final long readRatePerSecond = 1_000_000L;
-		final long writeRatePerSecond = 1_000_000L;
-		final int clientCount = 2;
+		final long toSend = 200_000_000L;
+		final long messageratePerSecond = 1_000_000;
+		final long readRatePerSecond = 1_000_000_000L;
+		final long writeRatePerSecond = 1_000L;
+		final int clientCount = 1;
 		final boolean lossy = true;
 		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
+				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
+						"resources/client.truststore", "password", true), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -360,13 +372,14 @@ public class NIOWaitSelector2NIO2 {
 	@Test
 	public void testServerConnection10Full() throws Exception {
 		final long toSend = 10_000_000L;
-		final long messageratePerSecond = 500_000L;
-		final long readRatePerSecond = 1_000000L;
-		final long writeRatePerSecond = 1_000000L;
+		final long messageratePerSecond = 100_000L;
+		final long readRatePerSecond = 1_000_000_000L;
+		final long writeRatePerSecond = 1_000L;
 		final int clientCount = 2;
 		final boolean lossy = false;
 		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
+				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
+						"resources/client.truststore", "password", false), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -376,11 +389,12 @@ public class NIOWaitSelector2NIO2 {
 		final long toSend = 10_000_000L;
 		final long messageratePerSecond = 500_000L;
 		final long readRatePerSecond = 1_000_000L;
-		final long writeRatePerSecond = 1_000_000L;
+		final long writeRatePerSecond = 1_000L;
 		final int clientCount = 2;
 		final boolean lossy = true;
 		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
+				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
+						"resources/client.truststore", "password", false), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -390,11 +404,12 @@ public class NIOWaitSelector2NIO2 {
 		final long toSend = 10_000_000L;
 		final long messageratePerSecond = 500_000L;
 		final long readRatePerSecond = 1_000000L;
-		final long writeRatePerSecond = 1_000000L;
-		final int clientCount = 20;
+		final long writeRatePerSecond = 1_000L;
+		final int clientCount = 2;
 		final boolean lossy = false;
 		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
+				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
+						"resources/client.truststore", "password", false), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
@@ -402,13 +417,14 @@ public class NIOWaitSelector2NIO2 {
 	@Test
 	public void testServerConnection10_20Lossy() throws Exception {
 		final long toSend = 10_000_000L;
-		final long messageratePerSecond = 500_000L;
-		final long readRatePerSecond = 1_000_000L;
-		final long writeRatePerSecond = 1_000_000L;
-		final int clientCount = 20;
+		final long messageratePerSecond = 5000_000L;
+		final long readRatePerSecond = 1_00000_000L;
+		final long writeRatePerSecond = 1_000L;
+		final int clientCount = 2;
 		final boolean lossy = true;
 		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
+				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
+						"resources/client.truststore", "password", false), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}

@@ -92,7 +92,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 			} catch (Exception e) {
 				close();
 				Assert.fail("Error in test" + e);
-			
+
 			}
 			break;
 
@@ -168,7 +168,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 
 		@Override
 		public void writeUnblocked(final ConnectionHelper.SenderCallin callin) {
-			logger.info("unblocked Server write  callin:{}", callin);
+			// logger.info("unblocked Server write callin:{}", callin);
 			serverCallin.unblockRead();
 		}
 
@@ -265,6 +265,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 
 		public void handleData(final TestEvent event, final long sequence, final boolean endOfBatch) throws Exception {
 			messageCount++;
+			long flushed = 0;
 			if (serverCallin.bufferRemaining() < event.getLength()) {
 				if (coalsce) {
 					// drop data
@@ -273,12 +274,13 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 					}
 					dropped++;
 				} else {
-					long errorAt = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1);
+					long errorAt = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(5);
 					// block writing until data is sent to client
 					while (serverCallin.bufferRemaining() < event.getLength()) {
 						final long written = serverCallin.flush();
+						flushed += written;
 						if (System.nanoTime() > errorAt) {
-							logger.error("Error timed out. dropping");
+							logger.error("Error timed out. dropping flushed:{}", flushed);
 							dropped++;
 							break;
 						}

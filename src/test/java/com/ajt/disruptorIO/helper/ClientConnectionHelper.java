@@ -61,7 +61,7 @@ class ClientConnectionHelper implements SenderCallback {
 	final TimerSenderCallback callback;
 	long startTimeNano = 0;
 	long closeTimeNano = 0;
-	boolean blocked = false;
+	boolean writeBlocked = false;
 	long slowTimer = 100 * 1000000;
 	long fastTimer = 500;
 	final int id;
@@ -104,7 +104,7 @@ class ClientConnectionHelper implements SenderCallback {
 		isConnected = true;
 		// start sending own data to get echo'd back
 		timerHandler.fireIn(0);
-		startTimeNano = timerHandler.currentNanoTime();
+		startTimeNano = timerHandler.currentNanoTime() - 1;
 		logger.info("opConnect Complete :" + callin);
 
 	}
@@ -114,7 +114,7 @@ class ClientConnectionHelper implements SenderCallback {
 	@Override
 	public void writeNowBlocked(final ConnectionHelper.SenderCallin callin) {
 		logger.info(" client blocked write callin:{}", callin.getLocalAddress());
-		blocked = true;
+		writeBlocked = true;
 		startBlockAt = System.nanoTime();
 	}
 
@@ -122,7 +122,7 @@ class ClientConnectionHelper implements SenderCallback {
 	public void writeUnblocked(final ConnectionHelper.SenderCallin callin) {
 		logger.info("client unblocked write for(us):{} callin:{}",
 				TimeUnit.NANOSECONDS.toMicros(System.nanoTime() - startBlockAt), callin.getLocalAddress());
-		blocked = false;
+		writeBlocked = false;
 	}
 
 	@Override
@@ -240,18 +240,20 @@ class ClientConnectionHelper implements SenderCallback {
 
 	/** sent out messages to the client periodically */
 	private class TimerSenderCallback implements TimerCallback {
+		long writeAttemptCounter;
 
 		@Override
 		public void timerCallback(final long dueAt, final long currentNanoTime) {
 			try {
-				if (blocked) {
+				if (writeBlocked) {
+					logger.debug("Write blocked, could not send client timer");
 					timerHandler.fireIn(slowTimer);
 					return;
 				}
 
 				final long elapsed = currentNanoTime - startTimeNano;
 				boolean somethingWritten = false;
-				while (elapsed * writeRatePerSecond > bytesWritten * 1000000000L && !blocked) {
+				while (elapsed * writeRatePerSecond > bytesWritten * 1000000000L && !writeBlocked) {
 
 					TestEvent.putIntToArray(writeBytes, TestEvent.Offsets.type,
 							TestEvent.MessageType.clientRequestMessage);
@@ -264,7 +266,12 @@ class ClientConnectionHelper implements SenderCallback {
 					final long couldSend = callin.sendMessage(writeBytes, 0, writeBytes.length);
 					if (couldSend == -1) {
 						messageCounter--;
-						logger.debug("got blocked trying to write, buffer full :-(");
+						writeAttemptCounter++;
+						if (writeAttemptCounter % 16384 == 0) {
+							logger.debug(
+									"got blocked trying to write using timer, buffer full :-( writeBlocked:{} send:{} counter:{}",
+									writeBlocked, messageCounter, writeAttemptCounter);
+						}
 						break;
 					}
 					somethingWritten = true;

@@ -17,15 +17,18 @@ import java.nio.channels.SelectableChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.PriorityQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 
 import org.agrona.LangUtil;
 import org.agrona.nio.NioSelectedKeySet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.HashBiMap;
 import com.lmax.disruptor.AlertException;
 import com.lmax.disruptor.Sequence;
 import com.lmax.disruptor.SequenceBarrier;
@@ -56,6 +59,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	final TimerLatencyReport timerLatencyReport;
 	final NIOWaitStrategyExecutor strategyExecutor;
 
+	final boolean debugTimes = true;
 	boolean isClosed = false;
 
 	static final Field SELECTED_KEYS_FIELD;
@@ -110,8 +114,17 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		} catch (final Exception ex) {
 			throw new RuntimeException(ex);
 		}
-
+		if (debugTimes) {
+			timerCallback = new HashMap<>();
+			logger.info("DEBUGTIME ENABLED");
+		} else {
+			timerCallback = null;
+		}
 	}
+
+	private final HashMap<SelectorCallback, Histogram> timerCallback;
+	private long startNIOTime = 0;
+	private long endNIOTime = 0;
 
 	public ScheduledExecutorService getScheduledExecutor() {
 		return strategyExecutor.getExecutorService();
@@ -126,14 +139,21 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			final SequenceBarrier barrier) throws AlertException, InterruptedException, TimeoutException {
 
 		long availableSequence;
-
+		final long lastClock = currentTimeNanos;
+		setNanoTime();
+		if (currentTimeNanos - lastClock > 1_000_000L) {
+			checkNIO();
+			if (currentTimeNanos - lastClock > 10_000_000L) {
+				checkTimer();
+			}
+		}
 		while ((availableSequence = dependentSequence.get()) < sequence) {
 			barrier.checkAlert();
-
 			setNanoTime();
 			if (checkNIO()) {
 				continue;
 			}
+
 			checkTimer();
 		}
 		return availableSequence;
@@ -147,8 +167,27 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 	@Override
 	public void signalAllWhenBlocking() {
-		// TODO Auto-generated method stub
 
+	}
+
+	private Histogram getHisto() {
+		final Histogram histo = new Histogram(
+				new long[] { 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200, 300, 400, 600,
+						800, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 512000, Long.MAX_VALUE });
+		return histo;
+	}
+
+	public static String toStringHisto(Histogram h) {
+		final StringBuilder sb = new StringBuilder();
+		sb.append("Mean: " + h.getMean());
+		sb.append(" Count:" + h.getCount());
+		final int size = h.getSize();
+		for (int a = 0; a < size; a++) {
+			if (h.getCountAt(a) > 0) {
+				sb.append(" ").append(h.getUpperBoundAt(a)).append(":").append(h.getCountAt(a));
+			}
+		}
+		return sb.toString();
 	}
 
 	boolean checkNIO() {
@@ -167,21 +206,88 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 					final SelectableChannel channel = key.channel();
 					switch (readyOps) {
 					case SelectionKey.OP_ACCEPT:
+						if (debugTimes) {
+							startNIOTime = System.nanoTime();
+						}
 						callback.opAccept(channel, currentTimeNanos);
+						if (debugTimes) {
+							endNIOTime = System.nanoTime();
+							final Histogram hg = timerCallback.get(callback);
+							if (hg == null) {
+								final Histogram h = getHisto();
+								h.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+								timerCallback.put(callback, h);
+							} else {
+								hg.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+							}
+						}
 						break;
 					case SelectionKey.OP_CONNECT:
+						if (debugTimes) {
+							startNIOTime = System.nanoTime();
+						}
 						callback.opConnect(channel, currentTimeNanos);
+						if (debugTimes) {
+							endNIOTime = System.nanoTime();
+							final Histogram hg = timerCallback.get(callback);
+							if (hg == null) {
+								final Histogram h = getHisto();
+								h.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+								timerCallback.put(callback, h);
+							} else {
+								hg.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+							}
+						}
 						break;
 					case SelectionKey.OP_READ:
+						if (debugTimes) {
+							startNIOTime = System.nanoTime();
+						}
 						callback.opRead(channel, currentTimeNanos);
+						if (debugTimes) {
+							endNIOTime = System.nanoTime();
+							final Histogram hg = timerCallback.get(callback);
+							if (hg == null) {
+								final Histogram h = getHisto();
+								h.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+								timerCallback.put(callback, h);
+							} else {
+								hg.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+							}
+						}
 						break;
 					case SelectionKey.OP_WRITE:
+						if (debugTimes) {
+							startNIOTime = System.nanoTime();
+						}
 						callback.opWrite(channel, currentTimeNanos);
+						if (debugTimes) {
+							endNIOTime = System.nanoTime();
+							final Histogram hg = timerCallback.get(callback);
+							if (hg == null) {
+								final Histogram h = getHisto();
+								h.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+								timerCallback.put(callback, h);
+							} else {
+								hg.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+							}
+						}
 						break;
 
 					case SelectionKey.OP_WRITE + SelectionKey.OP_READ:
 						callback.opWrite(channel, currentTimeNanos);
 						callback.opRead(channel, currentTimeNanos);
+						if (debugTimes) {
+							endNIOTime = System.nanoTime();
+							final Histogram hg = timerCallback.get(callback);
+							if (hg == null) {
+								final Histogram h = getHisto();
+								h.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+								timerCallback.put(callback, h);
+							} else {
+								hg.addObservation(TimeUnit.NANOSECONDS.toMicros(endNIOTime - startNIOTime));
+							}
+						}
 						break;
 
 					default:
@@ -454,6 +560,17 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			MyTimerHandler timer = timerHeap.poll();
 			logger.info("outstanding timer:{} at:{} in(us):{}", timer.timerName, timer.nanoTimeWillFireAfter,
 					TimeUnit.NANOSECONDS.toMicros(timer.nanoTimeWillFireAfter - timer.currentNanoTime()));
+		}
+		if (debugTimes) {
+			logger.info("CALLBACK TIME DEBUG");
+			timerCallback.forEach(new BiConsumer<NIOWaitStrategy.SelectorCallback, Histogram>() {
+
+				@Override
+				public void accept(final NIOWaitStrategy.SelectorCallback t, final Histogram u) {
+					logger.info("NIOCALLBACK:{} histo:{}", t, toStringHisto(u));
+
+				}
+			});
 		}
 
 		logger.info("Close complete");

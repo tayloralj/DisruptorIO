@@ -13,9 +13,24 @@ package com.ajt.disruptorIO.helper;
 import static org.junit.Assert.assertThat;
 
 import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URL;
+import java.security.KeyStore;
+import java.security.SecureRandom;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509ExtendedTrustManager;
 
 import org.hamcrest.Matchers;
 import org.hamcrest.core.Is;
@@ -30,6 +45,7 @@ import com.ajt.disruptorIO.ConnectionHelper;
 import com.ajt.disruptorIO.NIOWaitStrategy;
 import com.ajt.disruptorIO.SSLTCPSenderHelper;
 import com.ajt.disruptorIO.TestEvent;
+import com.google.common.io.Resources;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.ExceptionHandler;
 import com.lmax.disruptor.RingBuffer;
@@ -42,7 +58,7 @@ public class SSLConnectionTest {
 		System.setProperty("org.apache.logging.log4j.level", "DEBUG");
 
 	}
-	private final Logger logger = LoggerFactory.getLogger(SSLConnectionTest.class);
+	private final static Logger logger = LoggerFactory.getLogger(SSLConnectionTest.class);
 	private ExceptionHandler<TestEvent> errorHandler;
 	private long sequenceNum = 0;
 	private Disruptor<TestEvent> disruptorServer;
@@ -53,9 +69,10 @@ public class SSLConnectionTest {
 	private ServerConnectionHelper[] handlers;
 	private ThreadFactory threadFactoryServer;
 	private ThreadFactory threadFactoryClient;
+	private SSLContext sslContext;
 
 	@Before
-	public void setup() {
+	public void setup() throws Exception {
 
 		threadFactoryServer = new ThreadFactory() {
 			int count = 0;
@@ -108,6 +125,82 @@ public class SSLConnectionTest {
 
 	}
 
+	private static SSLContext setupContext(String passwd, String keyStoreFile, String trustStoreFile) throws Exception {
+		char[] passphrase = passwd.toCharArray();
+
+		final KeyStore ks = KeyStore.getInstance("JKS");
+		final URL keystoreURL = Resources.getResource(keyStoreFile);
+		ks.load(keystoreURL.openStream(), passphrase);
+		final KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+		kmf.init(ks, passphrase);
+		logger.info("KeyManager:{} keyStore:{}", kmf, ks);
+
+		final KeyStore ts = KeyStore.getInstance("JKS");
+		final URL truststoreURL = Resources.getResource(trustStoreFile);
+		ts.load(truststoreURL.openStream(), passphrase);
+		final TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+		tmf.init(ts);
+		logger.info("TMF:{} ", tmf);
+		X509ExtendedTrustManager tmf2 = new X509ExtendedTrustManager() {
+
+			@Override
+			public X509Certificate[] getAcceptedIssuers() {
+
+				return ((X509ExtendedTrustManager) tmf.getTrustManagers()[0]).getAcceptedIssuers();
+			}
+
+			@Override
+			public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+				logger.info("checkServerTrusted X509Certificate authType:" + authType);
+
+			}
+
+			@Override
+			public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
+				logger.info("checkClientTrusted authType:" + authType);
+
+			}
+
+			@Override
+			public void checkServerTrusted(X509Certificate[] chain, String authType, SSLEngine engine)
+					throws CertificateException {
+				logger.info("checkServerTrusted authType:" + authType + " engine:" + engine);
+
+			}
+
+			@Override
+			public void checkServerTrusted(X509Certificate[] chain, String authType, Socket socket)
+					throws CertificateException {
+				logger.info("checkServerTrusted authTYpe:" + authType + " socket:" + socket);
+
+			}
+
+			@Override
+			public void checkClientTrusted(X509Certificate[] chain, String authType, SSLEngine engine)
+					throws CertificateException {
+				logger.info("checkClientTrusted authType:" + authType + " engine:" + engine);
+
+			}
+
+			@Override
+			public void checkClientTrusted(X509Certificate[] chain, String authType, Socket socket)
+					throws CertificateException {
+				logger.info("checkServerTrusted");
+
+			}
+		};
+
+		final SSLContext sslCtx = SSLContext.getInstance("TLSv1.2");
+		// final SSLContext sslCtx = SSLContext.getDefault();
+
+		// sslCtx.init(null, null, null);
+		// sslCtx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), new
+		// SecureRandom());
+
+		sslCtx.init(kmf.getKeyManagers(), new TrustManager[] { tmf2 }, new SecureRandom());
+		return sslCtx;
+	}
+
 	@After
 	public void teardown() {
 		logger.info("Teardown");
@@ -140,7 +233,8 @@ public class SSLConnectionTest {
 
 	// runs on the main thread
 	private void testFastServer(final long toSend, final long messageratePerSecond, final long readRatePerSecond,
-			final long writeRatePerSecond, final int clients, final boolean lossy) throws Exception {
+			final long writeRatePerSecond, final int clients, final boolean lossy, final String cipher)
+			throws Exception {
 		try {
 			logger.info("Disruptor creating new disruptor for this context. toSend:{} rateAt:{}", toSend,
 					messageratePerSecond);
@@ -157,7 +251,7 @@ public class SSLConnectionTest {
 
 			// create a client set using the client disruptor
 			final TestEventClient tc = new TestEventClient(clients, writeRatePerSecond, readRatePerSecond,
-					(InetSocketAddress) handlers[0].remoteAddress, nioWaitStrategyClient);
+					(InetSocketAddress) handlers[0].remoteAddress, nioWaitStrategyClient, cipher);
 			disruptorClient.handleEventsWith(new TestEventClient[] { tc });
 			disruptorClient.start();
 
@@ -183,8 +277,8 @@ public class SSLConnectionTest {
 						connected = false;
 					}
 				}
-				Assert.assertThat("not  connected in time", System.nanoTime(), Matchers
-						.lessThan(startTimeNanos + TimeUnit.MILLISECONDS.toNanos(300 + 200 * tc.clients.length)));
+				final long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTimeNanos);
+				Assert.assertThat("not  connected in time", elapsed, Matchers.lessThan(300L + 200 * tc.clients.length));
 			}
 			logger.info("All connected");
 			while (actualMessageSendCount < toSend) {
@@ -278,13 +372,20 @@ public class SSLConnectionTest {
 				final long writeRatePerSecond, //
 				final long readRatePerSecond, //
 				final InetSocketAddress sa, //
-				final NIOWaitStrategy nioWait) throws Exception {
+				final NIOWaitStrategy nioWait, //
+				final String cipher) throws Exception {
 			this.sa = sa;
 			this.count = count;
 			this.writeRatePerSecond = writeRatePerSecond;
 			this.readRatePerSecond = readRatePerSecond;
-			helper = new SSLTCPSenderHelper(nioWait, "resources/client.jks", "resources/client.truststore", "password",
-					true);
+
+			SSLParameters sslP = SSLContext.getDefault().getSupportedSSLParameters();
+			if (cipher != null) {
+				sslP.setCipherSuites(new String[] { cipher });
+			}
+
+			helper = new SSLTCPSenderHelper(nioWait,
+					setupContext("password", "resources/client.jks", "resources/client.truststore"), sslP);
 			clients = new ClientConnectionHelper[count];
 			for (int a = 0; a < count; a++) {
 				clients[a] = new ClientConnectionHelper(writeRatePerSecond, a, sa, nioWait);
@@ -340,93 +441,44 @@ public class SSLConnectionTest {
 	}
 
 	@Test
-	public void testServerConnectionFull() throws Exception {
-		final long toSend = 20_000_000L;
-		final long messageratePerSecond = 200_000_000L;
-		final long readRatePerSecond = 1_000000L;
-		final long writeRatePerSecond = 1_000000L;
-		final int clientCount = 2;
-		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
-						"resources/client.truststore", "password", true), lossy, null, clientCount) };
-		disruptorServer.handleEventsWith(handlers);
-		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
-	}
-
-	@Test
-	public void testServerConnectionLossy() throws Exception {
-		final long toSend = 20_000000L;
-		final long messageratePerSecond = 1000000;
-		final long readRatePerSecond = 1000000L;
-		final long writeRatePerSecond = 100000L;
-		final int clientCount = 1;
-		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
-						"resources/client.truststore", "password", true), lossy, null, clientCount) };
-		disruptorServer.handleEventsWith(handlers);
-		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
-	}
-
-	@Test
 	public void testServerConnection10Full() throws Exception {
-		final long toSend = 10_000_000L;
-		final long messageratePerSecond = 500_000L;
-		final long readRatePerSecond = 1_000000L;
-		final long writeRatePerSecond = 1_000000L;
-		final int clientCount = 2;
-		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
-						"resources/client.truststore", "password", true), lossy, null, clientCount) };
-		disruptorServer.handleEventsWith(handlers);
-		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
-	}
+		sslContext = setupContext("password", "resources/client.jks", "resources/client.truststore");
 
-	@Test
-	public void testServerConnection10Lossy() throws Exception {
-		final long toSend = 10_000_000L;
-		final long messageratePerSecond = 500_000L;
-		final long readRatePerSecond = 1_000_000L;
-		final long writeRatePerSecond = 1_000_000L;
-		final int clientCount = 2;
+		final long toSend = 50_000_000L;
+		final long messageratePerSecond = 1_000_000_000L;
+		final long readRatePerSecond = 1_000_000_000L;
+		final long writeRatePerSecond = 1_000L;
+		final int clientCount = 5;
 		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
-						"resources/client.truststore", "password", true), lossy, null, clientCount) };
-		disruptorServer.handleEventsWith(handlers);
-		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
-	}
+		String cph ="";
+		// cph="TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA";
+		// cph = null;
+		SSLParameters sslP = SSLContext.getDefault().getSupportedSSLParameters();
 
-	@Test
-	public void testServerConnection10_20Full() throws Exception {
-		final long toSend = 10_000_000L;
-		final long messageratePerSecond = 500_000L;
-		final long readRatePerSecond = 1_000000L;
-		final long writeRatePerSecond = 1_000000L;
-		final int clientCount = 20;
-		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
-						"resources/client.truststore", "password", true), lossy, null, clientCount) };
-		disruptorServer.handleEventsWith(handlers);
-		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
-	}
-
-	@Test
-	public void testServerConnection10_20Lossy() throws Exception {
-		final long toSend = 10_000_000L;
-		final long messageratePerSecond = 500_000L;
-		final long readRatePerSecond = 1_000_000L;
-		final long writeRatePerSecond = 1_000_000L;
-		final int clientCount = 20;
-		final boolean lossy = true;
-		handlers = new ServerConnectionHelper[] {
-				new ServerConnectionHelper(new SSLTCPSenderHelper(nioWaitStrategyServer, "resources/client.jks",
-						"resources/client.truststore", "password", true), lossy, null, clientCount) };
-		disruptorServer.handleEventsWith(handlers);
-		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
+		final String[] suites = sslP.getCipherSuites();
+		for (int a = 0; a < suites.length; a++) {
+			cph = suites[a];
+			try {
+				setup();
+				long start = System.currentTimeMillis();
+				
+				sslP.setCipherSuites(new String[] { cph });
+				sslP.setUseCipherSuitesOrder(true);
+				SSLTCPSenderHelper sslTCP = new SSLTCPSenderHelper(nioWaitStrategyServer, sslContext, sslP);
+				handlers = new ServerConnectionHelper[] {
+						new ServerConnectionHelper(sslTCP, lossy, null, clientCount) };
+				disruptorServer.handleEventsWith(handlers);
+				testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy,
+						cph);
+				long finish = System.currentTimeMillis();
+				logger.info("SUCCESS took:" + (finish - start) + " cph:" + cph);
+			} catch (AssertionError |IllegalStateException ae) {
+				logger.error("ERROR FAILED " + cph,ae);
+			}
+			finally {
+				teardown();
+			}
+		}
 	}
 
 }

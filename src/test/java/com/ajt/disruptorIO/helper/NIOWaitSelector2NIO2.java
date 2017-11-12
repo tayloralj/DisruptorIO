@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.ConnectionHelper;
 import com.ajt.disruptorIO.NIOWaitStrategy;
+import com.ajt.disruptorIO.SSLTCPSenderHelper;
 import com.ajt.disruptorIO.TCPSenderHelper;
 import com.ajt.disruptorIO.TestEvent;
 import com.lmax.disruptor.EventHandler;
@@ -397,6 +398,27 @@ public class NIOWaitSelector2NIO2 {
 				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
+	}
+
+	@Test
+	public void testServerConnectionMaxRate() throws Exception {
+
+		final long toSend = 50_000_000L;
+		final long messageratePerSecond = 1_000_000_000L; // high
+		final long readRatePerSecond = 1_000_000_000L; // high
+		final long writeRatePerSecond = 1_000L; //
+		final int clientCount = 2;
+		final boolean lossy = true;
+
+		long start = System.currentTimeMillis();
+
+		handlers = new ServerConnectionHelper[] {
+				new ServerConnectionHelper(new TCPSenderHelper(nioWaitStrategyServer), lossy, null, clientCount) };
+		disruptorServer.handleEventsWith(handlers);
+		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
+		long finish = System.currentTimeMillis();
+
+		logger.info("SUCCESS took:" + (finish - start));
 	}
 
 	@Test

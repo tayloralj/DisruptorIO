@@ -399,6 +399,7 @@ public class SSLConnectionProtocolTest {
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
 
+	
 	@Test
 	public void testServerConnection10_20Full() throws Exception {
 		final long toSend = 10_000_000L;

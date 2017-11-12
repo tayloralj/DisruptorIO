@@ -76,7 +76,7 @@ public class NIOWaitDisruptorTest {
 
 		NIOWaitStrategy nioWaitStrategy = new NIOWaitStrategy(clock);
 		logger.trace("[{}] AsyncLoggerDisruptor creating new disruptor for this context.", "test");
-		int ringBufferSize = 2048;
+		int ringBufferSize = 16384;
 
 		ThreadFactory threadFactory = new ThreadFactory() {
 
@@ -100,34 +100,40 @@ public class NIOWaitDisruptorTest {
 						+ "exceptionHandler={}...",
 				disruptor.getRingBuffer().getBufferSize(), nioWaitStrategy.getClass().getSimpleName(), errorHandler);
 		disruptor.start();
-		LatencyTimer lt = new LatencyTimer();
+		final LatencyTimer lt = new LatencyTimer();
 		lt.register(nioWaitStrategy);
 
 		final RingBuffer<TestEvent> rb = disruptor.getRingBuffer();
 
-		long toSend = 200000;
+		final long toSend = 20_000_000;
+		long seqNum = -1;
+		long total = 0;
 		for (int a = 0; a < toSend; a++) {
-			final long seqNum = rb.next();
-			// Thread.sleep(20);
-			TestEvent te = rb.get(seqNum);
-			te.seqNum = a;
-			rb.publish(seqNum);
-			if ((seqNum & 127) == 0) {
-				Thread.sleep(1);
+			try {
+				seqNum = rb.next();
+				// Thread.sleep(20);
+				final TestEvent te = rb.get(seqNum);
+
+				te.seqNum = a;
+				total += te.seqNum;
+				// slow down the rate a little.
+			} finally {
+				rb.publish(seqNum);
 			}
 		}
-		long endTime = System.currentTimeMillis() + 10000L;
+		final long endTime = System.currentTimeMillis() + 10000L;
 		while (System.currentTimeMillis() < endTime) {
 			if (handlers[0].counter.get() == toSend) {
 				logger.info("completed :{}", toSend);
-				lt.stop();
-				Thread.sleep(5);
-
 				break;
 			}
 		}
+
 		assertThat(handlers[0].counter.get(), Matchers.is(toSend));
+		assertThat(handlers[0].total.get(), Matchers.is(total));
+		lt.stop();
 		disruptor.shutdown();
+		nioWaitStrategy.close();
 
 	}
 
@@ -146,14 +152,20 @@ public class NIOWaitDisruptorTest {
 
 	private class TestEventHandler implements EventHandler<TestEvent> {
 		private final Logger logger = LoggerFactory.getLogger(TestEventHandler.class);
-		private AtomicLong counter = new AtomicLong();
+		private AtomicLong counter = new AtomicLong(0);
+		private AtomicLong total = new AtomicLong(0);
+		private long lastEvent = 11;
 
 		@Override
-		public void onEvent(TestEvent event, long sequence, boolean endOfBatch) throws Exception {
+		public void onEvent(final TestEvent event, final long sequence, final boolean endOfBatch) throws Exception {
 			// logger.debug("Event :{} eob:{} seq:{} thread:{}", event.seqNum, endOfBatch,
 			// sequence,
 			// Thread.currentThread());
-			counter.incrementAndGet();
+			counter.addAndGet(1);
+			total.addAndGet(event.seqNum);
+			assertThat(lastEvent, Matchers.is(event.seqNum - 1));
+
+			lastEvent = event.seqNum;
 
 		}
 

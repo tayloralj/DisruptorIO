@@ -27,7 +27,6 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509ExtendedTrustManager;
@@ -443,14 +442,14 @@ public class SSLConnectionTest {
 	}
 
 	@Test
-	public void testServerConnection10Full() throws Exception {
+	public void testServerConnectionRatePerCipher() throws Exception {
 		sslContext = setupContext("password", "resources/client.jks", "resources/client.truststore");
 
 		final long toSend = 50_000_000L;
 		final long messageratePerSecond = 1_000_000_000L; // high
 		final long readRatePerSecond = 1_000_000_000L; // high
 		final long writeRatePerSecond = 1_000L; //
-		final int clientCount = 5;
+		final int clientCount = 2;
 		final boolean lossy = true;
 		String cph = "";
 		// cph="TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA";
@@ -480,6 +479,8 @@ public class SSLConnectionTest {
 				teardown();
 			}
 		}
+		setup();
+		
 	}
 
 }

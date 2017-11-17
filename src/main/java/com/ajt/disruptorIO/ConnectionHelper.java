@@ -19,6 +19,11 @@ import java.nio.channels.ClosedChannelException;
 public interface ConnectionHelper {
 
 	public int DEFAULT_BUFFER = 64 * 1024;
+	/**
+	 * milliseconds to wait before closing a socket which doesn't have an ssl
+	 * session setup
+	 */
+	public int SSL_TIMEOUT = 5000;
 
 	/** connect to a remote address, single callback when connected */
 	public ConnectionHelper.SenderCallin connectTo(final InetSocketAddress remote, final SenderCallback callback)

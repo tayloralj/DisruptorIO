@@ -10,11 +10,16 @@
  *******************************************************************************/
 package com.ajt.disruptorIO.helper;
 
+import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URL;
+import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
 import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.security.cert.CertificateException;
@@ -41,6 +46,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.ConnectionHelper;
+import com.ajt.disruptorIO.ConnectionHelper.SenderCallback;
+import com.ajt.disruptorIO.ConnectionHelper.SenderCallin;
 import com.ajt.disruptorIO.NIOWaitStrategy;
 import com.ajt.disruptorIO.SSLTCPSenderHelper;
 import com.ajt.disruptorIO.TestEvent;
@@ -441,12 +448,77 @@ public class SSLConnectionTest {
 
 	}
 
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	@Test
+	public void testSSLConnectionTimeout() throws Exception {
+		sslContext = setupContext("password", "resources/client.jks", "resources/client.truststore");
+
+		final SSLTCPSenderHelper sslTCP = new SSLTCPSenderHelper(nioWaitStrategyServer, sslContext, null);
+		ConnectionHelper.SenderCallin callin = sslTCP.bindTo(null, new SenderCallback() {
+			@Override
+			public void writeUnblocked(SenderCallin callin) {
+			}
+
+			@Override
+			public void writeNowBlocked(SenderCallin callin) {
+			}
+
+			@Override
+			public void readData(SenderCallin callin, ByteBuffer buffer) {
+			}
+
+			@Override
+			public void connected(SenderCallin callin) {
+			}
+
+			@Override
+			public void closed(SenderCallin callin) {
+			}
+		});
+		disruptorServer.handleEventsWith(new EventHandler() {
+
+			@Override
+			public void onEvent(Object event, long sequence, boolean endOfBatch) throws Exception {
+
+			}
+
+		});
+		disruptorServer.start();
+		SocketChannel sc = SocketChannel.open(callin.getRemoteAddress());
+		sc.configureBlocking(false);
+		ByteBuffer bb = ByteBuffer.wrap(new byte[128]);
+
+		Assert.assertThat("not connected " + sc, sc.isConnected(), is(true));
+		final long timeoutError = System.currentTimeMillis() + SSLTCPSenderHelper.SSL_TIMEOUT + 50;
+		while (System.currentTimeMillis() < timeoutError) {
+			try {
+				bb.clear();
+				final int read = sc.read(bb);
+				if (read == -1) {
+					// closed
+					return;
+				}
+			} catch (Exception e) {
+				logger.info("socket closed");
+				return;
+			}
+			Thread.sleep(50);
+			logger.info(
+					" checking socket closed:" + sc.isConnectionPending() + " " + sc.isOpen() + " " + sc.isConnected());
+
+		}
+		Assert.fail("Error socket not closed in time");
+		// Assert.assertThat("not closed " + s + " " + s.isClosed(), s.isConnected(),
+		// is(false));
+
+	}
+
 	@Test
 	public void testServerConnectionRatePerCipher() throws Exception {
 		sslContext = setupContext("password", "resources/client.jks", "resources/client.truststore");
 
-		final long toSend = 50_000_000L;
-		final long messageratePerSecond = 1_000_000_000L; // high
+		final long toSend = 10_000_000L;
+		final long messageratePerSecond = 1_000_000L; // high
 		final long readRatePerSecond = 1_000_000_000L; // high
 		final long writeRatePerSecond = 1_000L; //
 		final int clientCount = 2;
@@ -480,7 +552,7 @@ public class SSLConnectionTest {
 			}
 		}
 		setup();
-		
+
 	}
 
 }

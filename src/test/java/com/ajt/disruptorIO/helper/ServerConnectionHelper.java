@@ -46,8 +46,19 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 	public volatile SocketAddress remoteAddress = null;
 	private ConnectionHelper.SenderCallin serverCallin;
 
-	public ServerConnectionHelper(final ConnectionHelper serverSenderHelper, final boolean compact,
-			final InetSocketAddress address, final int maxClientCount) {
+	/**
+	 * open a listening server connection callback that will handle callbacks from
+	 * disruptor
+	 * 
+	 * @param serverSenderHelper
+	 * @param compact
+	 * @param address
+	 *            set to null to bind to any address
+	 * @param maxClientCount
+	 */
+	public ServerConnectionHelper(final ConnectionHelper serverSenderHelper, //
+			final boolean compact, final InetSocketAddress address, //
+			final int maxClientCount) {
 		coalsce = compact;
 		this.serverSenderHelper = serverSenderHelper;
 		ecc = new ServerConnectionHelper.EstablishedServerConnectionCallback[maxClientCount];

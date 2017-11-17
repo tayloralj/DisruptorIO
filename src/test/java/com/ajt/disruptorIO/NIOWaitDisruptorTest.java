@@ -72,11 +72,20 @@ public class NIOWaitDisruptorTest {
 	}
 
 	@Test
+	public void shouldWaitForValue2() throws Exception {
+		for (int a = 0; a < 1000; a++) {
+			setup();
+			shouldWaitForValue();
+		}
+
+	}
+
+	@Test
 	public void shouldWaitForValue() throws Exception {
 
 		NIOWaitStrategy nioWaitStrategy = new NIOWaitStrategy(clock);
 		logger.trace("[{}] AsyncLoggerDisruptor creating new disruptor for this context.", "test");
-		int ringBufferSize = 16384;
+		int ringBufferSize = 8;
 
 		ThreadFactory threadFactory = new ThreadFactory() {
 
@@ -101,11 +110,11 @@ public class NIOWaitDisruptorTest {
 				disruptor.getRingBuffer().getBufferSize(), nioWaitStrategy.getClass().getSimpleName(), errorHandler);
 		disruptor.start();
 		final LatencyTimer lt = new LatencyTimer();
-		lt.register(nioWaitStrategy);
+	//	lt.register(nioWaitStrategy);
 
 		final RingBuffer<TestEvent> rb = disruptor.getRingBuffer();
 
-		final long toSend = 20_000_000;
+		final long toSend = 2_000_000;
 		long seqNum = -1;
 		long total = 0;
 		for (int a = 0; a < toSend; a++) {

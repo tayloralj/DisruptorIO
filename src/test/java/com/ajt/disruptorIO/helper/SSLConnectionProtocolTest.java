@@ -177,14 +177,17 @@ public class SSLConnectionProtocolTest {
 			boolean connected = false;
 			while (!connected) {
 				connected = true;
-
+				int connectedCount = 0;
 				for (int a = 0; a < tc.clients.length; a++) {
 					if (false == tc.clients[a].isConnected()) {
 						connected = false;
+					} else {
+						connectedCount++;
 					}
 				}
 				final long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTimeNanos);
-				Assert.assertThat("not  connected in time", elapsed, Matchers.lessThan(300L + 200 * tc.clients.length));
+				Assert.assertThat("not  connected in time  connected:" + connectedCount, elapsed,
+						Matchers.lessThan(300L + 200 * tc.clients.length));
 			}
 			logger.info("All connected");
 			while (actualMessageSendCount < toSend) {
@@ -212,7 +215,8 @@ public class SSLConnectionProtocolTest {
 						te.nanoSendTime = System.nanoTime();
 						rb.publish(sequenceNum);
 						actualMessageSendCount++;
-						Assert.assertThat(handlers[0].isClosed(), Is.is(false));
+						Assert.assertThat("Error is closed, should be open" + handlers[0].toString(),
+								handlers[0].isClosed(), Is.is(false));
 
 					} catch (Exception ice) {
 						// land here if a lossy client
@@ -399,7 +403,6 @@ public class SSLConnectionProtocolTest {
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
 
-	
 	@Test
 	public void testServerConnection10_20Full() throws Exception {
 		final long toSend = 10_000_000L;

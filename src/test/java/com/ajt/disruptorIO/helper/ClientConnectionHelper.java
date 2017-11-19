@@ -221,7 +221,9 @@ class ClientConnectionHelper implements SenderCallback {
 		closeTimeNano = timerHandler.currentNanoTime();
 		isConnected = false;
 		isClosed = true;
-		timerHandler.cancelTimer();
+		if (timerHandler.isRegistered()) {
+			timerHandler.cancelTimer();
+		}
 		logger.info(
 				"\tClientClosing id:{} \n"
 						+ "\n\tREAD_CLIENT:bytesRead:{} messageSentCounter:{} serverMessageRead:{} serverRttRead:{}"

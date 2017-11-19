@@ -33,18 +33,24 @@ import com.ajt.disruptorIO.TestEvent;
 import com.lmax.disruptor.EventHandler;
 import com.lmax.disruptor.collections.Histogram;
 
+/**
+ * simple class to provide a basic server which sends messages from the onEvent
+ * over a tcp socket. uses implementation of the the connection helper to manage
+ * the connection
+ */
+
 public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoCloseable {
 	private final Logger logger = LoggerFactory.getLogger(ServerConnectionHelper.class);
-	final AtomicLong counter = new AtomicLong();
-	final AtomicBoolean isClosed = new AtomicBoolean(false);
+	public final AtomicLong counter = new AtomicLong();
+	private final AtomicBoolean isClosed = new AtomicBoolean(false);
 	private final boolean coalsce;
 	private final Histogram elapsedHisto = TestEvent.getHisto();
 	private final Histogram delayHisto = TestEvent.getHisto();
 	private final ServerConnectionHelper.EstablishedServerConnectionCallback[] ecc;
 	private final ConnectionHelper serverSenderHelper;
 
-	public volatile SocketAddress remoteAddress = null;
 	private ConnectionHelper.SenderCallin serverCallin;
+	public volatile SocketAddress remoteAddress = null;
 
 	/**
 	 * open a listening server connection callback that will handle callbacks from
@@ -119,6 +125,12 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 
 	public boolean isClosed() {
 		return isClosed.get();
+	}
+
+	public String toString() {
+		return "ServerConnection isCLosed:" + isClosed() + " serverSenderHelper:" + serverSenderHelper + " counter:"
+				+ counter + " remoteAddress:" + remoteAddress;
+
 	}
 
 	public void close() {

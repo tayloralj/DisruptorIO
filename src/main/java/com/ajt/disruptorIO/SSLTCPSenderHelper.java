@@ -59,8 +59,12 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 	public static boolean recordStats = false;
 
-	final private SSLContext sslc;
+	private final SSLContext sslc;
 	private final SSLParameters sslParameters;
+
+	public String toString() {
+		return "SSLTCPSender helper count:" + count + " sslContext:" + sslc + " param:" + sslParameters;
+	}
 
 	/**
 	 * use existing context
@@ -188,13 +192,14 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		if (sslParameters != null) {
 			sslEngine.setSSLParameters(sslParameters);
 		}
-		for (int a = 0; a < sslEngine.getEnabledCipherSuites().length; a++) {
-			logger.info("Enabled client:{}", sslEngine.getEnabledCipherSuites()[a]);
+		if (logger.isTraceEnabled()) {
+			for (int a = 0; a < sslEngine.getEnabledCipherSuites().length; a++) {
+				logger.trace("Enabled client:{}", sslEngine.getEnabledCipherSuites()[a]);
+			}
+			for (int a = 0; a < sslEngine.getSupportedCipherSuites().length; a++) {
+				logger.trace("getSupportedCipherSuites client:{}", sslEngine.getSupportedCipherSuites()[a]);
+			}
 		}
-		for (int a = 0; a < sslEngine.getSupportedCipherSuites().length; a++) {
-			logger.info("getSupportedCipherSuites client:{}", sslEngine.getSupportedCipherSuites()[a]);
-		}
-
 		final IOHandler IOh = new IOHandler(sc, callback, sslEngine);
 		return IOh;
 
@@ -220,12 +225,13 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		if (sslParameters != null) {
 			sslEngine.setSSLParameters(sslParameters);
 		}
-
-		for (int a = 0; a < sslEngine.getEnabledCipherSuites().length; a++) {
-			logger.info("Enabled server:{}", sslEngine.getEnabledCipherSuites()[a]);
-		}
-		for (int a = 0; a < sslEngine.getSupportedCipherSuites().length; a++) {
-			logger.info("getSupportedCipherSuites server:{}", sslEngine.getSupportedCipherSuites()[a]);
+		if (logger.isTraceEnabled()) {
+			for (int a = 0; a < sslEngine.getEnabledCipherSuites().length; a++) {
+				logger.trace("Enabled server:{}", sslEngine.getEnabledCipherSuites()[a]);
+			}
+			for (int a = 0; a < sslEngine.getSupportedCipherSuites().length; a++) {
+				logger.trace("getSupportedCipherSuites server:{}", sslEngine.getSupportedCipherSuites()[a]);
+			}
 		}
 
 		final IOHandler IOh = new IOHandler(socketChannel, callback, sslEngine);
@@ -263,7 +269,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		private long flushCount = 0;
 
 		private final SSLEngine sslEngine;
-		final static int size = 131072;
+		private final static int readWriteBufferSize = 131072;
+
+		private final SocketConnectionTimeout socketConnectTimeout;
+		private final TimerHandler socketConnectTimeoutHandler;
 
 		private IOHandler(final ServerSocketChannel ssc, final SenderCallback callback, final SSLEngine sslEngine)
 				throws IOException, ClosedChannelException {
@@ -272,8 +281,8 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			this.callback = callback;
 			this.counter = count++;
 			this.sslEngine = sslEngine;
-			readBytes = new byte[size];
-			writeBytes = new byte[size];
+			readBytes = new byte[readWriteBufferSize];
+			writeBytes = new byte[readWriteBufferSize];
 
 			decodedReadBuffer = ByteBuffer.wrap(readBytes);
 			decodedReadBuffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -295,8 +304,8 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			} else {
 				throw new ClosedChannelException();
 			}
-			sct = null;
-			th = null;
+			socketConnectTimeout = null;
+			socketConnectTimeoutHandler = null;
 		}
 
 		private IOHandler(final SocketChannel sc, final SenderCallback callback, final SSLEngine sslEngine)
@@ -306,8 +315,8 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			this.callback = callback;
 			this.counter = count++;
 			this.sslEngine = sslEngine;
-			readBytes = new byte[size];
-			writeBytes = new byte[size];
+			readBytes = new byte[readWriteBufferSize];
+			writeBytes = new byte[readWriteBufferSize];
 			decodedReadBuffer = ByteBuffer.wrap(readBytes);
 			decodedReadBuffer.order(ByteOrder.LITTLE_ENDIAN);
 			writeBuffer = ByteBuffer.wrap(writeBytes);
@@ -320,12 +329,9 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 			sk = wait.registerSelectableChannel(sc, this);
 			sk.interestOps(SelectionKey.OP_CONNECT);
-			sct = new SocketConnectionTimeout();
-			th = wait.createTimer(sct, "SSLConnectionTimeout " + sc);
+			socketConnectTimeout = new SocketConnectionTimeout();
+			socketConnectTimeoutHandler = wait.createTimer(socketConnectTimeout, "SSLConnectionTimeout " + sc);
 		}
-
-		private final SocketConnectionTimeout sct;
-		private final TimerHandler th;
 
 		private class SocketConnectionTimeout implements TimerCallback {
 
@@ -381,6 +387,11 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				isWriteBlocked = false;
 				isReadBlocked = false;
 				callback.connected(this);
+				if (socketConnectTimeoutHandler.isRegistered()) {
+					socketConnectTimeoutHandler.cancelTimer();
+				} else {
+					logger.error("Error was expectint timer to be registered during timeout");
+				}
 				setKeyStatus();
 				break;
 			case NEED_UNWRAP:
@@ -476,7 +487,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				isReadBlocked = false;
 
 				key.interestOps(SelectionKey.OP_READ);
-				handler.th.fireIn(TimeUnit.MILLISECONDS.toNanos(SSL_TIMEOUT));
+				handler.socketConnectTimeoutHandler.fireIn(TimeUnit.MILLISECONDS.toNanos(SSL_TIMEOUT));
 
 				logger.info("opAccept local:{} remote:{}", localAddress, remoteAddress);
 			} catch (Exception ioe) {
@@ -888,6 +899,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			}
 			isClosed = true;
 
+			if (socketConnectTimeoutHandler.isRegistered()) {
+				// cancel the timer. normallly expect it to be closed already
+				socketConnectTimeoutHandler.cancelTimer();
+			}
 			if (bytesInBuffer() > 0) {
 				try {
 					final long inBuffer = flush();

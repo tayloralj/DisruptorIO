@@ -16,6 +16,8 @@ package com.ajt.disruptorIO;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.*;
 
+import org.hamcrest.Matchers;
+import org.hamcrest.core.Is;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -81,7 +83,7 @@ public class NIOWaitTimerTest {
 	};
 
 	@Test
-	public void test() {
+	public void testTImers() {
 		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);) {
 			TimerCallbackImpl timer1 = new TimerCallbackImpl("");
 			TimerHandler timerHandler1 = waitStrat.createTimer(timer1, timer1.toString());
@@ -144,29 +146,172 @@ public class NIOWaitTimerTest {
 		}
 
 		@Override
-		public void timerCallback(long dueAt, long currentNanoTime) {
+		public void timerCallback(final long dueAt, final long currentNanoTime) {
 			calledAt = currentNanoTime;
 			calledCount++;
 			logger.info("TimerCallback fired:{} dueAt:{} actualAt:{} name:{}", calledCount, dueAt, calledAt, name);
+			assertThat(currentNanoTime, Matchers.greaterThanOrEqualTo(dueAt));
 		}
 
 	}
 
 	@Test
-	public void test2() {
+	public void testManyTimers() {
 		nanoTime = 0;
 		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);) {
-			TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
-			TimerHandler thList[] = new TimerHandler[50];
+			final TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
+			final TimerHandler thList[] = new TimerHandler[tcList.length];
 			for (int a = 0; a < tcList.length; a++) {
 				tcList[a] = new TimerCallbackImpl("a:" + a);
 				thList[a] = waitStrat.createTimer(tcList[a], "tc:" + a);
 				thList[a].fireIn(50 + a);
 			}
-			nanoTime = 1000;
+			nanoTime = 1000 + thList.length;
 			waitStrat.setNanoTime();
-			waitStrat.checkTimer();
+			// fire the timers.
+			for (int a = 0; a < thList.length; a++) {
+				waitStrat.checkTimer();
+			}
+			for (int a = 0; a < tcList.length; a++) {
+				assertThat(tcList[a].calledAt, Is.is(nanoTime));
+				assertThat(tcList[a].calledCount, Is.is(1L));
+			}
+			// fire again
+			for (int a = 0; a < tcList.length; a++) {
+
+				thList[a].fireIn(50 + a);
+			}
+			nanoTime += 1000 + thList.length;
+			waitStrat.setNanoTime();
+			for (int a = 0; a < thList.length; a++) {
+				waitStrat.checkTimer();
+			}
+			for (int a = 0; a < tcList.length; a++) {
+				assertThat(tcList[a].calledAt, Is.is(nanoTime));
+				assertThat(tcList[a].calledCount, Is.is(2L));
+			}
+
 		} finally {
+		}
+	}
+
+	@Test
+	public void testCorrectTimers() {
+		nanoTime = 0;
+		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);) {
+			final TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
+			final TimerHandler thList[] = new TimerHandler[tcList.length];
+			for (int a = 0; a < tcList.length; a++) {
+				tcList[a] = new TimerCallbackImpl("a:" + a);
+				thList[a] = waitStrat.createTimer(tcList[a], "tc:" + a);
+				thList[a].fireIn(50);
+			}
+			nanoTime = 49;
+			waitStrat.setNanoTime();
+			// fire the timers.
+			for (int a = 0; a < thList.length; a++) {
+				waitStrat.checkTimer();
+			}
+			for (int a = 0; a < tcList.length; a++) {
+				assertThat(tcList[a].calledAt, Is.is(-1L));
+				assertThat(tcList[a].calledCount, Is.is(0L));
+			}
+
+			nanoTime = 50;
+			waitStrat.setNanoTime();
+			for (int a = 0; a < thList.length; a++) {
+				waitStrat.checkTimer();
+			}
+			for (int a = 0; a < tcList.length; a++) {
+				assertThat(tcList[a].calledAt, Is.is(nanoTime));
+				assertThat(tcList[a].calledCount, Is.is(1L));
+			}
+			// increment time,. but no more timers.
+			nanoTime += 50;
+			waitStrat.setNanoTime();
+			for (int a = 0; a < thList.length; a++) {
+				waitStrat.checkTimer();
+			}
+			for (int a = 0; a < tcList.length; a++) {
+				assertThat(tcList[a].calledAt, Is.is(50L));
+				assertThat(tcList[a].calledCount, Is.is(1L));
+			}
+		} finally {
+		}
+	}
+
+	@Test
+	public void testCancelTimers() {
+		nanoTime = 0;
+		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);) {
+			final TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
+			final TimerHandler thList[] = new TimerHandler[tcList.length];
+			for (int a = 0; a < tcList.length; a++) {
+				tcList[a] = new TimerCallbackImpl("a:" + a);
+				thList[a] = waitStrat.createTimer(tcList[a], "tc:" + a);
+				thList[a].fireAt(50);
+				assertThat(thList[a].isRegistered(), Is.is(true));
+			}
+			nanoTime = 49;
+			waitStrat.setNanoTime();
+			{
+				// set timers. cancel. move clock on. check again.
+				{
+					for (int a = 0; a < thList.length; a++) {
+						waitStrat.checkTimer();
+					}
+					for (int a = 0; a < tcList.length; a++) {
+						assertThat(tcList[a].calledAt, Is.is(-1L));
+						assertThat(tcList[a].calledCount, Is.is(0L));
+					}
+					for (int a = 0; a < thList.length; a++) {
+						thList[a].cancelTimer();
+						assertThat("" + thList[a], thList[a].isRegistered(), Is.is(false));
+					}
+				}
+				nanoTime = 51;
+				waitStrat.setNanoTime();
+				{
+					for (int a = 0; a < thList.length; a++) {
+						waitStrat.checkTimer();
+					}
+					for (int a = 0; a < tcList.length; a++) {
+						assertThat(tcList[a].calledAt, Is.is(-1L));
+						assertThat(tcList[a].calledCount, Is.is(0L));
+					}
+				}
+			}
+			{
+				{// set timers. cancel. check
+					for (int a = 0; a < tcList.length; a++) {
+						thList[a].fireAt(nanoTime + 1);
+						assertThat(thList[a].isRegistered(), Is.is(true));
+					}
+					for (int a = 0; a < thList.length; a++) {
+						waitStrat.checkTimer();
+					}
+					for (int a = 0; a < tcList.length; a++) {
+						assertThat(tcList[a].calledAt, Is.is(-1L));
+						assertThat(tcList[a].calledCount, Is.is(0L));
+					}
+					for (int a = 0; a < thList.length; a++) {
+						thList[a].cancelTimer();
+					}
+				}
+				nanoTime = 51;
+				waitStrat.setNanoTime();
+				{
+					for (int a = 0; a < thList.length; a++) {
+						waitStrat.checkTimer();
+					}
+					for (int a = 0; a < tcList.length; a++) {
+						assertThat(tcList[a].calledAt, Is.is(-1L));
+						assertThat(tcList[a].calledCount, Is.is(0L));
+					}
+				}
+			}
+		} finally {
+
 		}
 	}
 }

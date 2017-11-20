@@ -27,15 +27,15 @@ import com.ajt.disruptorIO.NIOWaitStrategy.TimerHandler;
  * @author ajt
  *
  */
-class TimerLatencyReport {
+final class TimerLatencyReport {
 	private final Logger logger = LoggerFactory.getLogger(TimerLatencyReport.class);
 
+	private final ArrayList<MyTimerHandler> timerList;
 	final TimerLatencyCallbackImpl callback;
-	TimerHandler timerHandler;
-	final ArrayList<MyTimerHandler> timerList;
 	final long timerReportInterval;
+	TimerHandler timerHandler;
 
-	public TimerLatencyReport(NIOWaitStrategy was) {
+	public TimerLatencyReport(final NIOWaitStrategy was) {
 		timerReportInterval = TimeUnit.SECONDS.toNanos(5);
 		callback = new TimerLatencyCallbackImpl();
 		timerList = new ArrayList<>(32);
@@ -51,12 +51,13 @@ class TimerLatencyReport {
 		public void timerCallback(final long dueAt, final long currentNanoTime) {
 			for (int a = 0; a < timerList.size(); a++) {
 				final MyTimerHandler mth = timerList.get(a);
-				if (mth.timerHistogram.getCount() > 0) {
-					logger.info("TimerStats timer:{} count:{} runTime:{} lateBy:{} ", mth.timerName,
-							mth.timerHistogram.getCount(), mth.timerHistogram.toString(), mth.lateBy.toString());
+				if (mth.getTimerHistogram().getCount() > 0) {
+					logger.info("TimerStats timer:{} count:{} runTime:{} lateBy:{} ", mth.getTimerName(),
+							mth.getTimerHistogram().getCount(), mth.getTimerHistogram().toString(),
+							mth.getLateByHistogram().toString());
 
-					mth.timerHistogram.clear();
-					mth.lateBy.clear();
+					mth.getTimerHistogram().clear();
+					mth.getLateByHistogram().clear();
 				}
 			}
 			timerHandler.fireIn(timerReportInterval);

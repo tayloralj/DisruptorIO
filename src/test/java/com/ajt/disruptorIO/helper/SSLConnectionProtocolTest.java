@@ -345,7 +345,7 @@ public class SSLConnectionProtocolTest {
 
 	@Test
 	public void testServerConnectionFull() throws Exception {
-		final long toSend = 200_000_000L;
+		final long toSend = 20_000_000L;
 		final long messageratePerSecond = 200_000_000L;
 		final long readRatePerSecond = 1_000000L;
 		final long writeRatePerSecond = 1_000000L;
@@ -360,7 +360,7 @@ public class SSLConnectionProtocolTest {
 
 	@Test
 	public void testServerConnectionLossy() throws Exception {
-		final long toSend = 200_000_000L;
+		final long toSend = 20_000_000L;
 		final long messageratePerSecond = 1_000_000;
 		final long readRatePerSecond = 1_000_000_000L;
 		final long writeRatePerSecond = 1_000L;

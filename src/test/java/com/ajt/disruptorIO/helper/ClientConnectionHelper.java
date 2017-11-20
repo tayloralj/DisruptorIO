@@ -71,6 +71,9 @@ class ClientConnectionHelper implements SenderCallback {
 	private long startBlockAt = 0;
 	private final long writeRatePerSecond;
 
+	boolean isConnected = false;
+
+	
 	public ClientConnectionHelper(//
 			final long writeRatePerSecond, //
 			final int id, //
@@ -93,8 +96,6 @@ class ClientConnectionHelper implements SenderCallback {
 		timerHandler = nioWait.createTimer(callback, "NIO connection-" + id);
 
 	}
-
-	boolean isConnected = false;
 
 	public boolean isConnected() {
 		return isConnected;

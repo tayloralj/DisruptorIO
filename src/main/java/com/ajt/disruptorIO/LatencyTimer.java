@@ -23,7 +23,7 @@ import com.lmax.disruptor.collections.Histogram;
  * simple timer callback class which attempts to record how long it takes to get
  * called after scheduling itself
  */
-public class LatencyTimer {
+final public class LatencyTimer {
 	private final Logger logger = LoggerFactory.getLogger(LatencyTimer.class);
 	private TimerHandler handler;
 	private TimerCallbackImpl callback;

@@ -343,7 +343,9 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 				// first element in the heap is not ready to fire yet.
 				break;
 			}
-			timerHeap.poll(); // remove from timer heap
+			final MyTimerHandler removed = timerHeap.remove();
+			assert (removed == handler);
+			// timerHeap.poll(); // remove from timer heap
 			handler.isRegistered = false; // unregister. timer objects can register themselves again. eg a hb
 			final long timerLateBy = currentTimeNanos - handler.nanoTimeWillFireAfter;
 			final long startTimerAt = System.nanoTime();
@@ -360,6 +362,10 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		}
 	}
 
+	/**
+	 * create a timer handler which is used to control the registration of the
+	 * callback
+	 */
 	public TimerHandler createTimer(final TimerCallback callback, final String timerName) {
 		final MyTimerHandler th = new MyTimerHandler(callback, timerName);
 		timerLatencyReport.addTimerHandler(th);
@@ -373,16 +379,17 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	 * @author ajt
 	 *
 	 */
-	class MyTimerHandler implements TimerHandler, Comparable<MyTimerHandler>, Comparator<MyTimerHandler> {
-		final long[] histogramBin = new long[] { 50, 100, 200, 400, 600, 800, 1000, 2000, 3000, 4000, 6000, 12000,
-				16000, 32000, 64000, 128000, 256000, 512000, 1024000, 2048000, 4096000, 32768000 };
+	final class MyTimerHandler implements TimerHandler, Comparable<MyTimerHandler>, Comparator<MyTimerHandler> {
+		private final long[] histogramBin = new long[] { 50, 100, 200, 400, 600, 800, 1000, 2000, 3000, 4000, 6000,
+				12000, 16000, 32000, 64000, 128000, 256000, 512000, 1024000, 2048000, 4096000, 32768000 };
 
-		final TimerCallback timerCallback;
-		boolean isRegistered = false;
-		long nanoTimeWillFireAfter;
-		final String timerName;
-		final Histogram timerHistogram;
-		final Histogram lateBy;
+		private final TimerCallback timerCallback;
+		private boolean isRegistered = false;
+		private long nanoTimeWillFireAfter;
+		private final String timerName;
+		private final Histogram timerHistogram;
+		private final Histogram lateBy;
+		private long cancelCount;
 
 		public MyTimerHandler(final TimerCallback callback, final String name) {
 			this.timerCallback = callback;
@@ -412,12 +419,14 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 		@Override
 		public boolean cancelTimer() {
-
+			cancelCount++;
 			if (isRegistered) {
 				final boolean removed = timerHeap.remove(this);
 				if (removed == false) {
-					throw new RuntimeException("Error timer was not removed from heap:" + timerName);
+					throw new RuntimeException("Error timer was not removed from heap:" + timerName + " size:timerHeap:"
+							+ timerHeap.size() + " cancelCount:" + cancelCount);
 				}
+				isRegistered=false;
 				return true;
 			}
 			return false;
@@ -428,7 +437,8 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			if (isRegistered) {
 				final boolean removed = timerHeap.remove(this);
 				if (removed == false) {
-					throw new RuntimeException("Error timer was not removed from heap:" + timerName);
+					throw new RuntimeException("Error timer was not removed from heap:" + timerName + " count:"
+							+ timerHistogram.getCount() + " cancelCount:" + cancelCount);
 				}
 			}
 			nanoTimeWillFireAfter = absTimeNano;
@@ -459,6 +469,23 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		@Override
 		public long currentNanoTime() {
 			return currentTimeNanos;
+		}
+
+		Histogram getTimerHistogram() {
+			return timerHistogram;
+		}
+
+		public String toString() {
+			return "Timer:" + timerName + " canceled:" + cancelCount + " fired:" + timerHistogram.getCount()
+					+ " isRegistered:" + isRegistered;
+		}
+
+		String getTimerName() {
+			return timerName;
+		}
+
+		Histogram getLateByHistogram() {
+			return lateBy;
 		}
 
 	}

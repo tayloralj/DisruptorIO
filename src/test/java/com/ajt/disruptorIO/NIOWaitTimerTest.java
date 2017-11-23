@@ -141,7 +141,7 @@ public class NIOWaitTimerTest {
 		long calledCount = 0;
 		String name = "";
 
-		public TimerCallbackImpl(String nm) {
+		public TimerCallbackImpl(final String nm) {
 			this.name = nm;
 		}
 
@@ -310,6 +310,125 @@ public class NIOWaitTimerTest {
 					}
 				}
 			}
+		} finally {
+
+		}
+	}
+
+	@Test
+	public void benchmmarkCancelTimers() {
+		nanoTime = 0;
+		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);) {
+			final TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
+			final TimerHandler thList[] = new TimerHandler[tcList.length];
+			for (int a = 0; a < tcList.length; a++) {
+				tcList[a] = new TimerCallbackImpl("a:" + a);
+				thList[a] = waitStrat.createTimer(tcList[a], "tc:" + a);
+				thList[a].fireAt(50);
+				assertThat(thList[a].isRegistered(), Is.is(true));
+			}
+			nanoTime = 30;
+			waitStrat.setNanoTime();
+			for (int a = 0; a < thList.length / NIOWaitStrategy.MAX_TIMER_BATCH_SIZE; a++) {
+				waitStrat.checkTimer();
+			}
+			for (int a = 0; a < tcList.length; a++) {
+				assertThat(thList[a].isRegistered(), Is.is(true));
+			}
+			final long startAt = System.currentTimeMillis();
+			final long finishAt = startAt + 5000;
+			long counter = 0;
+			while (System.currentTimeMillis() < finishAt) {
+				for (int a = 0; a < tcList.length; a++) {
+					assertThat(thList[a].cancelTimer(), Is.is(true));
+					assertThat(thList[a].isRegistered(), Is.is(false));
+					counter++;
+				}
+				nanoTime += 10;
+				waitStrat.setNanoTime();
+				for (int a = 0; a < thList.length / NIOWaitStrategy.MAX_TIMER_BATCH_SIZE; a++) {
+					waitStrat.checkTimer();
+				}
+				for (int a = 0; a < tcList.length; a++) {
+					assertThat(thList[a].isRegistered(), Is.is(false));
+					assertThat(thList[a].fireIn(10), Is.is(true));
+					assertThat(thList[a].isRegistered(), Is.is(true));
+				}
+				for (int a = 0; a < thList.length / NIOWaitStrategy.MAX_TIMER_BATCH_SIZE; a++) {
+					waitStrat.checkTimer();
+				}
+			}
+			logger.info("Timers canceled rate(s):{}", counter, counter * 1000 / (System.currentTimeMillis() - startAt));
+
+		} finally {
+
+		}
+	}
+
+	private class QuietTimerCallbackImpl implements TimerCallback {
+		long calledAt = -1;
+		long calledCount = 0;
+		String name = "";
+
+		public QuietTimerCallbackImpl(final String nm) {
+			this.name = nm;
+		}
+
+		@Override
+		public void timerCallback(final long dueAt, final long currentNanoTime) {
+			calledAt = currentNanoTime;
+			calledCount++;
+			assertThat(currentNanoTime, Matchers.greaterThanOrEqualTo(dueAt));
+	//		logger.info("TimerCallback fired:{} dueAt:{} actualAt:{} name:{}", calledCount, dueAt, calledAt, name);
+		}
+
+	}
+
+	@Test
+	public void benchmmarkFireTimers() {
+		nanoTime = 0;
+		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);) {
+			final QuietTimerCallbackImpl tcList[] = new QuietTimerCallbackImpl[50];
+			final TimerHandler thList[] = new TimerHandler[tcList.length];
+			for (int a = 0; a < tcList.length; a++) {
+				tcList[a] = new QuietTimerCallbackImpl("a:" + a);
+				thList[a] = waitStrat.createTimer(tcList[a], "tc:" + a);
+				assertThat(thList[a].isRegistered(), Is.is(false));
+			}
+			nanoTime = 51;
+			waitStrat.setNanoTime();
+			for (int a = 0; a < thList.length / NIOWaitStrategy.MAX_TIMER_BATCH_SIZE; a++) {
+				waitStrat.checkTimer();
+			}
+			for (int a = 0; a < tcList.length; a++) {
+				assertThat(thList[a].isRegistered(), Is.is(false));
+			}
+			final long startAt = System.currentTimeMillis();
+			final long finishAt = startAt + 5000;
+			long counter = 0;
+			while (System.currentTimeMillis() < finishAt) {
+				for (int a = 0; a < thList.length; a++) {
+					assertThat(thList[a].fireIn(10), Is.is(true));
+					assertThat(thList[a].isRegistered(), Is.is(true));
+					counter++;
+				}
+				nanoTime += 100;
+				waitStrat.setNanoTime();
+				for (int a = 0; a < thList.length / NIOWaitStrategy.MAX_TIMER_BATCH_SIZE; a++) {
+					waitStrat.checkTimer();
+				}
+				for (int a = 0; a < thList.length; a++) {
+					assertThat(thList[a].isRegistered(), Is.is(false));
+				}
+				for (int a = 0; a < thList.length / NIOWaitStrategy.MAX_TIMER_BATCH_SIZE; a++) {
+					waitStrat.checkTimer();
+				}
+				for (int a = 0; a < thList.length; a++) {
+					assertThat(thList[a].isRegistered(), Is.is(false));
+				}
+			}
+			logger.info("Timers FIRED rate(s):{}", counter, counter * 1000 / (System.currentTimeMillis() - startAt));
+
 		} finally {
 
 		}

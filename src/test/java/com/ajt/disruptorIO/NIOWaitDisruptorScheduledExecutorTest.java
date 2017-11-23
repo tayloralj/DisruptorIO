@@ -319,6 +319,7 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 	}
 
 	private static final class TestEvent {
+		@SuppressWarnings("unused")
 		private long seqNum = -1;
 		public static final EventFactory<TestEvent> EVENT_FACTORY = new EventFactory<TestEvent>() {
 			@Override

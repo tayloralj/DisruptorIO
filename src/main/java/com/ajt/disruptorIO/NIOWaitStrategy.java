@@ -60,7 +60,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 	final boolean debugTimes = true;
 	boolean isClosed = false;
-
+	static final int MAX_TIMER_BATCH_SIZE = 5;
 	static final Field SELECTED_KEYS_FIELD;
 	static final Field PUBLIC_SELECTED_KEYS_FIELD;
 	// use funky code from aeron to install object free code
@@ -337,7 +337,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	 * will only fire a small number of timers to prevent blocking too long.
 	 */
 	void checkTimer() {
-		for (int a = 5; timerHeap.size() > 0 && a > 0; a--) {
+		for (int a = MAX_TIMER_BATCH_SIZE; timerHeap.size() > 0 && a > 0; a--) {
 			final MyTimerHandler handler = timerHeap.peek();
 			if (currentTimeNanos < handler.nanoTimeWillFireAfter) {
 				// first element in the heap is not ready to fire yet.
@@ -426,7 +426,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 					throw new RuntimeException("Error timer was not removed from heap:" + timerName + " size:timerHeap:"
 							+ timerHeap.size() + " cancelCount:" + cancelCount);
 				}
-				isRegistered=false;
+				isRegistered = false;
 				return true;
 			}
 			return false;
@@ -584,7 +584,8 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		}
 		while (timerHeap.size() > 0 && counter-- > 0) {
 			MyTimerHandler timer = timerHeap.poll();
-			logger.info("outstanding timer:{} at:{} in(us):{}", timer.timerName, timer.nanoTimeWillFireAfter,
+			logger.info("outstanding timer:{} cancelCount:{} fireCount:{} at:{} in(us):{}", timer.timerName,
+					timer.cancelCount, timer.timerHistogram.getCount(), timer.nanoTimeWillFireAfter,
 					TimeUnit.NANOSECONDS.toMicros(timer.nanoTimeWillFireAfter - timer.currentNanoTime()));
 		}
 		if (debugTimes) {

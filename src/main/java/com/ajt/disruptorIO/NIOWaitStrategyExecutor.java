@@ -51,7 +51,7 @@ class NIOWaitStrategyExecutor implements Closeable {
 	private final NIOWaitStrategy wait;
 	private static int counter = 0;
 
-	public NIOWaitStrategyExecutor(NIOWaitStrategy waiter) {
+	public NIOWaitStrategyExecutor(final NIOWaitStrategy waiter) {
 		wait = waiter;
 		callback = new StrategyExecutorTimerCallback();
 		timerHandler = waiter.createTimer(callback, "StrategyExecutorTimer");
@@ -59,7 +59,9 @@ class NIOWaitStrategyExecutor implements Closeable {
 		executorService = new TimerExecutorService();
 		queue = new ConcurrentLinkedQueue<>();
 		delayedTaskTimerCache = new ArrayList<>();
-
+		// 
+		//set clock before starting
+		mostRecentTime = waiter.getClock().getTimeNanos();
 		// simple cache
 		for (int a = 0; a < 20; a++) {
 			delayedTaskTimerCache.add(new CallableDelayedTask());
@@ -148,21 +150,21 @@ class NIOWaitStrategyExecutor implements Closeable {
 
 	}
 
-	private class TimerScheduledFuture<V> extends FutureTask<V> implements ScheduledFuture<V> {
+	private final class TimerScheduledFuture<V> extends FutureTask<V> implements ScheduledFuture<V> {
 		final long runAfterNS;
 
-		public TimerScheduledFuture(Callable<V> callable, final long ns) {
+		public TimerScheduledFuture(final Callable<V> callable, final long ns) {
 			super(callable);
 			runAfterNS = ns;
 		}
 
 		@Override
-		public long getDelay(TimeUnit unit) {
+		public long getDelay(final TimeUnit unit) {
 			return unit.convert(runAfterNS - mostRecentTime, TimeUnit.NANOSECONDS);
 		}
 
 		@Override
-		public int compareTo(Delayed o) {
+		public int compareTo(final Delayed o) {
 			final long oNano = o.getDelay(TimeUnit.NANOSECONDS);
 			if (runAfterNS < oNano) {
 				return -1;
@@ -171,6 +173,18 @@ class NIOWaitStrategyExecutor implements Closeable {
 				return 1;
 			}
 			return 0;
+		}
+
+		public String toString() {
+			V get;
+			try {
+				get = get(1, TimeUnit.NANOSECONDS);
+			} catch (Exception e) {
+				get = null;
+			} finally {
+			}
+
+			return "TimerScheduledFuture " + get + " runAfter:" + runAfterNS;
 		}
 
 	}

@@ -45,24 +45,34 @@ import com.lmax.disruptor.collections.Histogram;
  *
  */
 public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
-	private final Logger logger = LoggerFactory.getLogger(NIOWaitStrategy.class);
-	final NIOClock clock;
-	final boolean timerStats;
-
-	final Selector selector;
-	final NioSelectedKeySet selectedKeySet;
-	/** temp until better struct */
-	final PriorityQueue<MyTimerHandler> timerHeap;
-	long currentTimeNanos = 0;
-	final long SLOW_TIMER_WARN;
-	final TimerLatencyReport timerLatencyReport;
-	final NIOWaitStrategyExecutor strategyExecutor;
-
-	final boolean debugTimes = true;
-	boolean isClosed = false;
+	static final long[] HISTO_BIN_SIZE = new long[] { 50, 100, 200, 400, 600, 800, 1000, 2000, 3000, 4000, 6000, 12000,
+			16000, 32000, 64000, 128000, 256000, 512000, 1024000, 2048000, 4096000, 32768000 };
 	static final int MAX_TIMER_BATCH_SIZE = 5;
 	static final Field SELECTED_KEYS_FIELD;
 	static final Field PUBLIC_SELECTED_KEYS_FIELD;
+	final long SLOW_TIMER_WARN = 500_00L;
+	final boolean debugTimes;
+	final boolean assertThread;
+	private Thread threadCheck = null;
+
+	private final Logger logger = LoggerFactory.getLogger(NIOWaitStrategy.class);
+	final NioSelectedKeySet selectedKeySet;
+
+	/** temp until better struct */
+	final PriorityQueue<MyTimerHandler> timerHeap;
+	final TimerLatencyReport timerLatencyReport;
+	final NIOWaitStrategyExecutor strategyExecutor;
+	final NIOClock clock;
+	final boolean timerStats;
+	final Selector selector;
+
+	private final HashMap<SelectorCallback, Histogram> timerCallback;
+	private long startNIOTime = 0;
+	private long endNIOTime = 0;
+
+	boolean isClosed = false;
+	long currentTimeNanos = 0;
+
 	// use funky code from aeron to install object free code
 	static {
 		Field selectKeysField = null;
@@ -86,12 +96,18 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	}
 
 	public NIOWaitStrategy(final NIOClock clock) {
-		this(clock, false);
+		this(clock, false, false, true);
 	}
 
-	public NIOWaitStrategy(final NIOClock clock, final boolean timerStats) {
+	public NIOWaitStrategy(final NIOClock clock, //
+			final boolean timerStats, //
+			final boolean debugTimes, //
+			final boolean assertThread) {
 		this.clock = clock;
 		this.timerStats = timerStats;
+		this.debugTimes = debugTimes;
+		this.assertThread = assertThread;
+		//
 		logger.info("Created NIOWait with clock:{}", clock);
 		timerHeap = new PriorityQueue<>(255);
 		timerLatencyReport = new TimerLatencyReport(this);
@@ -103,7 +119,6 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		strategyExecutor = new NIOWaitStrategyExecutor(this);
 		setNanoTime();
 
-		SLOW_TIMER_WARN = 500_000L; // 500us
 		// use own selector keyset to remove obj creation.
 		try {
 			selector = Selector.open();
@@ -120,10 +135,6 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			timerCallback = null;
 		}
 	}
-
-	private final HashMap<SelectorCallback, Histogram> timerCallback;
-	private long startNIOTime = 0;
-	private long endNIOTime = 0;
 
 	public ScheduledExecutorService getScheduledExecutor() {
 		return strategyExecutor.getExecutorService();
@@ -155,7 +166,28 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 			checkTimer();
 		}
+		checkThread();
 		return availableSequence;
+
+	}
+
+	/**
+	 * throw an exception if the thread is messed with. handy for debugging.
+	 */
+	private final void checkThread() {
+		if (assertThread) {
+			if (threadCheck == null) {
+				threadCheck = Thread.currentThread();
+			} else {
+				final Thread runningThread = Thread.currentThread();
+				if (runningThread.equals(threadCheck)) {
+
+				} else {
+					throw new RuntimeException("Error thread check. thread problem changed. started on:" + threadCheck
+							+ " current:" + runningThread);
+				}
+			}
+		}
 
 	}
 
@@ -187,6 +219,10 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			}
 		}
 		return sb.toString();
+	}
+
+	NIOClock getClock() {
+		return clock;
 	}
 
 	boolean checkNIO() {
@@ -337,6 +373,8 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	 * will only fire a small number of timers to prevent blocking too long.
 	 */
 	void checkTimer() {
+		checkThread();
+
 		for (int a = MAX_TIMER_BATCH_SIZE; timerHeap.size() > 0 && a > 0; a--) {
 			final MyTimerHandler handler = timerHeap.peek();
 			if (currentTimeNanos < handler.nanoTimeWillFireAfter) {
@@ -380,22 +418,20 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	 *
 	 */
 	final class MyTimerHandler implements TimerHandler, Comparable<MyTimerHandler>, Comparator<MyTimerHandler> {
-		private final long[] histogramBin = new long[] { 50, 100, 200, 400, 600, 800, 1000, 2000, 3000, 4000, 6000,
-				12000, 16000, 32000, 64000, 128000, 256000, 512000, 1024000, 2048000, 4096000, 32768000 };
 
-		private final TimerCallback timerCallback;
-		private boolean isRegistered = false;
-		private long nanoTimeWillFireAfter;
-		private final String timerName;
-		private final Histogram timerHistogram;
-		private final Histogram lateBy;
-		private long cancelCount;
+		final TimerCallback timerCallback;
+		final String timerName;
+		final Histogram timerHistogram;
+		final Histogram lateBy;
+		boolean isRegistered = false;
+		long cancelCount;
+		long nanoTimeWillFireAfter;
 
 		public MyTimerHandler(final TimerCallback callback, final String name) {
 			this.timerCallback = callback;
 			this.timerName = name;
-			timerHistogram = new Histogram(histogramBin);
-			lateBy = new Histogram(histogramBin);
+			timerHistogram = new Histogram(HISTO_BIN_SIZE);
+			lateBy = new Histogram(HISTO_BIN_SIZE);
 		}
 
 		@Override
@@ -502,6 +538,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	public SelectionKey registerSelectableChannel(final SelectableChannel channel, final SelectorCallback callback)
 			throws ClosedChannelException {
 		final SelectionKey key = channel.register(selector, 0, callback);
+		@SuppressWarnings("unused")
 		final int validOps = channel.validOps();
 		return key;
 	}

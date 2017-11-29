@@ -24,16 +24,17 @@ import com.lmax.disruptor.collections.Histogram;
  * called after scheduling itself
  */
 final public class LatencyTimer {
-	private final Logger logger = LoggerFactory.getLogger(LatencyTimer.class);
+	private final static Logger logger = LoggerFactory.getLogger(LatencyTimer.class);
+	private final TimerCallbackImpl callback;
+	private final Histogram histo;
+	private final AtomicBoolean isStopped = new AtomicBoolean(false);
 	private TimerHandler handler;
-	private TimerCallbackImpl callback;
-	private Histogram histo;
 
 	public LatencyTimer() {
 		callback = new TimerCallbackImpl();
-		histo = new Histogram(
-				new long[] { 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200, 300, 400, 600,
-						800, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 512000, Long.MAX_VALUE });
+		histo = new Histogram(new long[] { 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200,
+				300, 400, 600, 800, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 512000, 512000 * 2,
+				512000 * 4, 512000 * 8, 512000 * 16, 512000 * 32, 512000 * 64, Long.MAX_VALUE });
 
 	}
 
@@ -42,14 +43,12 @@ final public class LatencyTimer {
 		handler.fireIn(1000);
 	}
 
-	private AtomicBoolean isStopped = new AtomicBoolean(false);
-
 	/** call from any thread to request a shutdown on the next callback */
 	public void stop() {
 		isStopped.set(true);
 	}
 
-	private class TimerCallbackImpl implements TimerCallback {
+	private final class TimerCallbackImpl implements TimerCallback {
 		private final String name = "timerLatencyMeasure";
 
 		private long interval = 1;
@@ -59,16 +58,19 @@ final public class LatencyTimer {
 		@Override
 		public void timerCallback(final long dueAt, final long currentNanoTime) {
 			if (isStopped.get() == true) {
-				logger.info(" histo size:{} histo:{} ", histo.getCount(), histo.toString());
+				logger.info("TimerCallback how late numbers stats total CallbackCount:{} histo:{} ", histo.getCount(),
+						histo.toString());
 				for (int a = 0; a < histo.getSize(); a++) {
-					logger.info("Upper:{} count:{}", histo.getUpperBoundAt(a), histo.getCountAt(a));
+					if (histo.getCountAt(a) > 0) {
+						logger.info("Upper:{} count:{}", histo.getUpperBoundAt(a), histo.getCountAt(a));
+					}
 				}
 				return;
 			}
 
 			count++;
 			final long actualNanoTime = System.nanoTime();
-			
+
 			histo.addObservation(actualNanoTime - lastFiredAtActual);
 			if (count < 11000) {
 				histo.clear();

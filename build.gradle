@@ -30,17 +30,18 @@ repositories {
          mavenCentral()
 }
 pitest {
-    targetClasses = ['com.ajt.*']  //by default "${project.group}.*"
+    targetClasses = ['com.ajt.disruptorIO.*']  //by default "${project.group}.*"
     //pitestVersion = "1.1.0" //not needed when a default PIT version should be used
     threads = 4
     outputFormats = ['XML', 'HTML']
+    
 }
 dependencies {
     // This dependency is exported to consumers, that is to say found on their compile classpath.
     api 'org.apache.commons:commons-math3:3.6.1'
 
     // This dependency is used internally, and not exposed to consumers on their own compile classpath.
-    implementation 'com.google.guava:guava:21.0'
+    implementation 'com.google.guava:guava:23.5-jre'
 
     // Use JUnit test framework
     testImplementation 'junit:junit:4.12'
@@ -55,14 +56,13 @@ dependencies {
   compile group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.9.1'
   compile group: 'org.apache.logging.log4j', name: 'log4j-slf4j-impl', version: '2.9.1'
 
-	compile group: 'org.agrona', name: 'agrona', version: '0.9.9'
+	compile group: 'org.agrona', name: 'agrona', version: '0.9.11'
 	
   	// https://mvnrepository.com/artifact/uk.co.real-logic/sbe-all
-        compile group: 'uk.co.real-logic', name: 'sbe-all', version: '1.7.0'
+        compile group: 'uk.co.real-logic', name: 'sbe-all', version: '1.7.5'
   	// https://mvnrepository.com/artifact/io.aeron/aeron-all
-        compile group: 'io.aeron', name: 'aeron-all', version: '1.5.1'
-	// https://mvnrepository.com/artifact/com.google.guava/guava
-		compile group: 'com.google.guava', name: 'guava', version: '23.2-jre'
+        compile group: 'io.aeron', name: 'aeron-all', version: '1.6.0'
+
   
 
 	// https://mvnrepository.com/artifact/org.hamcrest/hamcrest-all
@@ -84,7 +84,8 @@ test {
     // show standard out and standard error of the test JVM(s) on the console
    testLogging.showStandardStreams = true
    include 'com/ajt/disruptorIO/**'
-// listen to events in the test execution lifecycle
+	jvmArgs '-verbose:gc -XX:-XX:-PrintGCDetails -XX:+PrintFlagsFinal -HeapDumpOnOutOfMemoryError '
+	// listen to events in the test execution lifecycle
 
    beforeTest { 
       descriptor -> logger.lifecycle("Running test: " + descriptor)

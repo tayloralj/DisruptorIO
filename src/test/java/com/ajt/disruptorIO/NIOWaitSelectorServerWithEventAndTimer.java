@@ -10,7 +10,6 @@
  *******************************************************************************/
 package com.ajt.disruptorIO;
 
-import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
 import java.io.InputStream;
@@ -31,6 +30,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.hamcrest.core.Is;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -168,7 +168,7 @@ public class NIOWaitSelectorServerWithEventAndTimer {
 			}
 			lt.stop();
 			Thread.sleep(10);
-			assertThat(handlers[0].counter.get(), is(toSend + 1));
+			assertThat(handlers[0].counter.get(), Is.is(toSend + 1));
 			long end = System.currentTimeMillis();
 			logger.info("Took(ms):{} DataSend:{} rate:{} MBwritten:{} rate:{}", (end - start),
 					handlers[0].counter.get(), handlers[0].counter.get() * 1000 / (end - start), bytesWritten / 1000000,

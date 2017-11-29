@@ -10,11 +10,8 @@
  *******************************************************************************/
 package com.ajt.disruptorIO.helper;
 
-import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URL;
@@ -118,8 +115,8 @@ public class SSLConnectionTest {
 
 			}
 		};
-		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), false);
-		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), false);
+		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock());
+		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock());
 		int ringBufferSize = 2048;
 		disruptorServer = new Disruptor<>(TestEvent.EVENT_FACTORY, ringBufferSize, threadFactoryServer,
 				ProducerType.SINGLE, nioWaitStrategyServer);
@@ -488,7 +485,7 @@ public class SSLConnectionTest {
 		sc.configureBlocking(false);
 		ByteBuffer bb = ByteBuffer.wrap(new byte[128]);
 
-		Assert.assertThat("not connected " + sc, sc.isConnected(), is(true));
+		Assert.assertThat("not connected " + sc, sc.isConnected(), Is.is(true));
 		final long timeoutError = System.currentTimeMillis() + SSLTCPSenderHelper.SSL_TIMEOUT + 50;
 		while (System.currentTimeMillis() < timeoutError) {
 			try {

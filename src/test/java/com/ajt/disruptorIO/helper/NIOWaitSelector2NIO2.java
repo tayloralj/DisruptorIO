@@ -27,7 +27,6 @@ import org.slf4j.LoggerFactory;
 
 import com.ajt.disruptorIO.ConnectionHelper;
 import com.ajt.disruptorIO.NIOWaitStrategy;
-import com.ajt.disruptorIO.SSLTCPSenderHelper;
 import com.ajt.disruptorIO.TCPSenderHelper;
 import com.ajt.disruptorIO.TestEvent;
 import com.lmax.disruptor.EventHandler;
@@ -95,8 +94,8 @@ public class NIOWaitSelector2NIO2 {
 
 			}
 		};
-		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), false);
-		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), false);
+		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock());
+		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock());
 		int ringBufferSize = 2048;
 		disruptorServer = new Disruptor<>(TestEvent.EVENT_FACTORY, ringBufferSize, threadFactoryServer,
 				ProducerType.SINGLE, nioWaitStrategyServer);

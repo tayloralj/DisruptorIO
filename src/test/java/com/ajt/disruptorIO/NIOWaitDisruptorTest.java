@@ -12,14 +12,19 @@ package com.ajt.disruptorIO;
 
 import static org.junit.Assert.assertThat;
 
+import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.hamcrest.Matchers;
+import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -42,9 +47,12 @@ public class NIOWaitDisruptorTest {
 
 	}
 	private final Logger logger = LoggerFactory.getLogger(NIOWaitDisruptorTest.class);
-	private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
-	NIOWaitStrategy.NIOClock clock;
-	ExceptionHandler<TestEvent> errorHandler;
+	private ExecutorService EXECUTOR;
+	private NIOWaitStrategy.NIOClock clock;
+	private ExceptionHandler<TestEvent> errorHandler;
+	private NIOWaitStrategy nioWaitStrategy;
+	private Disruptor<TestEvent> disruptor;
+	private TestEventHandler[] handlers;
 
 	@Before
 	public void setup() {
@@ -69,6 +77,42 @@ public class NIOWaitDisruptorTest {
 
 			}
 		};
+		EXECUTOR = Executors.newCachedThreadPool();
+
+		nioWaitStrategy = new NIOWaitStrategy(clock);
+		logger.trace("[{}] AsyncLoggerDisruptor creating new disruptor for this context.", "test");
+		int ringBufferSize = 8;
+
+		final ThreadFactory threadFactory = new ThreadFactory() {
+
+			@Override
+			public Thread newThread(final Runnable r) {
+				final Thread th = new Thread(r, "NIOWaitDisruptorTest");
+
+				return th;
+			}
+		};
+		disruptor = new Disruptor<>(TestEvent.EVENT_FACTORY, ringBufferSize, threadFactory, ProducerType.SINGLE,
+				nioWaitStrategy);
+
+		disruptor.setDefaultExceptionHandler(errorHandler);
+
+		handlers = new TestEventHandler[] { new TestEventHandler() };
+		disruptor.handleEventsWith(handlers);
+	}
+
+	@After
+	public void tearDown() {
+		try {
+			disruptor.shutdown();
+			nioWaitStrategy.close();
+			EXECUTOR.shutdown();
+			EXECUTOR.awaitTermination(100, TimeUnit.MILLISECONDS);
+
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
 	}
 
 	@Test
@@ -83,34 +127,13 @@ public class NIOWaitDisruptorTest {
 	@Test
 	public void shouldWaitForValue() throws Exception {
 
-		NIOWaitStrategy nioWaitStrategy = new NIOWaitStrategy(clock);
-		logger.trace("[{}] AsyncLoggerDisruptor creating new disruptor for this context.", "test");
-		int ringBufferSize = 8;
-
-		ThreadFactory threadFactory = new ThreadFactory() {
-
-			@Override
-			public Thread newThread(Runnable r) {
-				final Thread th = new Thread(r, "WaStratThread");
-
-				return th;
-			}
-		};
-		Disruptor<TestEvent> disruptor = new Disruptor<>(TestEvent.EVENT_FACTORY, ringBufferSize, threadFactory,
-				ProducerType.SINGLE, nioWaitStrategy);
-
-		disruptor.setDefaultExceptionHandler(errorHandler);
-
-		final TestEventHandler[] handlers = { new TestEventHandler() };
-		disruptor.handleEventsWith(handlers);
-
 		logger.debug(
 				"Starting AsyncLogger disruptor for this context with ringbufferSize={}, waitStrategy={}, "
 						+ "exceptionHandler={}...",
 				disruptor.getRingBuffer().getBufferSize(), nioWaitStrategy.getClass().getSimpleName(), errorHandler);
 		disruptor.start();
 		final LatencyTimer lt = new LatencyTimer();
-	//	lt.register(nioWaitStrategy);
+		// lt.register(nioWaitStrategy);
 
 		final RingBuffer<TestEvent> rb = disruptor.getRingBuffer();
 
@@ -144,6 +167,50 @@ public class NIOWaitDisruptorTest {
 		disruptor.shutdown();
 		nioWaitStrategy.close();
 
+	}
+
+	@Test
+	public void assertThreadTest() throws Exception {
+		NIOWaitStrategy nioWaitStrategy = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true, true, true);
+		SequenceUpdater sequenceUpdater = new SequenceUpdater(120, nioWaitStrategy);
+		EXECUTOR.execute(sequenceUpdater);
+		sequenceUpdater.waitForStartup();
+		Sequence cursor = new Sequence(0);
+		long sequence = nioWaitStrategy.waitFor(0, cursor, sequenceUpdater.sequence, new DummySequenceBarrier());
+		assertThat(sequence, Matchers.is(0L));
+		final AtomicBoolean caughtException = new AtomicBoolean(false);
+		final Thread t = new Thread(new Runnable() {
+
+			@Override
+			public void run() {
+				// deliberately call the timer check from another thread
+				nioWaitStrategy.checkTimer();
+			}
+		});
+		t.setName("test should run from another thread test");
+		t.setUncaughtExceptionHandler(new UncaughtExceptionHandler() {
+
+			@Override
+			public void uncaughtException(Thread t, Throwable e) {
+
+				// expect to get callback of exception
+				logger.info("Caught");
+				caughtException.set(true);
+			}
+
+		});
+		t.start();
+		t.join(100);
+		// confirm thread completed
+		if (t.isAlive()) {
+			Assert.fail("ERror thread didn't quit");
+		}
+		// confirm that we got an exception
+		if (caughtException.get() == false) {
+			Assert.fail("Error didnt fail exception caused by wrong thread");
+		}
+
+		nioWaitStrategy.close();
 	}
 
 	@Test

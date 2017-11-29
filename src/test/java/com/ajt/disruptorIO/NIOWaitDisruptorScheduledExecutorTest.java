@@ -2,7 +2,7 @@
  * Copyright (c) 2017 IBM Corporation and others.
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
- * which accompanies this distribution, and is available at
+ * which accompanies this distribution, and Is.is available at
  * http://www.eclipse.org/legal/epl-v10.html
  *
  * Contributors:
@@ -10,7 +10,6 @@
  *******************************************************************************/
 package com.ajt.disruptorIO;
 
-import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
 import java.util.ArrayList;
@@ -23,8 +22,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.hamcrest.core.Is;
 import org.hamcrest.number.OrderingComparison;
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -37,27 +38,29 @@ import com.lmax.disruptor.dsl.Disruptor;
 import com.lmax.disruptor.dsl.ProducerType;
 
 public class NIOWaitDisruptorScheduledExecutorTest {
+	private final Logger logger = LoggerFactory.getLogger(NIOWaitDisruptorScheduledExecutorTest.class);
 	static {
+		// turn up the logging
 		System.setProperty("org.apache.logging.log4j.simplelog.StatusLogger.level", "TRACE");
 		System.setProperty("org.apache.logging.log4j.level", "DEBUG");
 
 	}
-	private final Logger logger = LoggerFactory.getLogger(NIOWaitDisruptorScheduledExecutorTest.class);
-//	private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
-	NIOWaitStrategy.NIOClock clock;
-	NIOWaitStrategy nioWaitStrategy;
-	Disruptor<TestEvent> disruptor;
-	RingBuffer<TestEvent> rb;
-	long toSend = 10_000_000L;
-	LatencyTimer lt;
 
-	TestEventHandler[] handlers;
+	private NIOWaitStrategy.NIOClock clock;
+	private NIOWaitStrategy nioWaitStrategy;
+	private Disruptor<TestEvent> disruptor;
+	private RingBuffer<TestEvent> rb;
+	private long toSend = 10_000_000L;
+	private LatencyTimer lt;
+
+	private TestEventHandler[] handlers;
 
 	@Before
 	public void setup() {
-		nioWaitStrategy = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock());
+		clock = NIOWaitStrategy.getDefaultClock();
+		nioWaitStrategy = new NIOWaitStrategy(clock, true, true, true);
 		logger.trace("[{}] AsyncLoggerDisruptor creating new disruptor for this context.", "test");
-		int ringBufferSize = 2048;
+		int ringBufferSize = 1024;
 		handlers = new TestEventHandler[] { new TestEventHandler() };
 		ThreadFactory threadFactory = new ThreadFactory() {
 
@@ -94,8 +97,8 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 
 	}
 
-	public void testSent() {
-		long endTime = System.currentTimeMillis() + 10000L;
+	public void testEventsDelivered() {
+		final long endTime = System.currentTimeMillis() + 10000L;
 		while (System.currentTimeMillis() < endTime) {
 			if (handlers[0].counter.get() == toSend) {
 				logger.info("completed :{}", toSend);
@@ -104,10 +107,10 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 					Thread.sleep(5);
 				} catch (Exception e) {
 				}
-
-				break;
+				return;
 			}
 		}
+		logger.error("ERROR didn't complete expected:{} actual:{}", toSend, handlers[0].counter.get());
 	}
 
 	@Test
@@ -133,32 +136,33 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 				te.seqNum = a++;
 				rb.publish(endSequence);
 			} else {
-				assertThat(endTime, is(OrderingComparison.greaterThan(System.currentTimeMillis())));
+				assertThat(endTime, Is.is(OrderingComparison.greaterThan(System.currentTimeMillis())));
 			}
 		}
-		testSent();
+		testEventsDelivered();
 
-		assertThat(handlers[0].counter.get(), is(toSend));
-		assertThat(isRun.get(), is(true));
+		assertThat(handlers[0].counter.get(), Is.is(toSend));
+		assertThat(isRun.get(), Is.is(true));
 
 	}
 
 	@Test
 	public void shouldNotFire() throws Exception {
 
-		ScheduledExecutorService ses = nioWaitStrategy.getScheduledExecutor();
+		final ScheduledExecutorService ses = nioWaitStrategy.getScheduledExecutor();
 		final AtomicBoolean isRun = new AtomicBoolean(false);
-		Runnable r = new Runnable() {
+		final Runnable r = new Runnable() {
 			@Override
 			public void run() {
 				logger.info("shouldNotFire Fired");
 				isRun.set(true);
+				Assert.fail("SHould not fire");
 			}
 		};
 		ses.schedule(r, 1, TimeUnit.DAYS);
 		long endSequence = 0;
 
-		long endTime = System.currentTimeMillis() + toSend * 1000L / 100000L;
+		final long endTime = System.currentTimeMillis() + toSend;
 		for (int a = 0; a < toSend;) {
 			if (rb.hasAvailableCapacity(1)) {
 				endSequence = rb.next();
@@ -167,14 +171,16 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 				te.seqNum = a++;
 				rb.publish(endSequence);
 			} else {
-				assertThat(endTime, is(OrderingComparison.greaterThan(System.currentTimeMillis())));
+				if (System.currentTimeMillis() > endTime) {
+					Assert.fail("Error did not complete in time");
+				}
 			}
 
 		}
-		testSent();
+		testEventsDelivered();
 
-		assertThat(handlers[0].counter.get(), is(toSend));
-		assertThat(isRun.get(), is(false));
+		assertThat(handlers[0].counter.get(), Is.is(toSend));
+		assertThat("Error is run is set to true, should not of run", isRun.get(), Is.is(false));
 
 	}
 
@@ -200,14 +206,14 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 				te.seqNum = a++;
 				rb.publish(endSequence);
 			} else {
-				assertThat(endTime, is(OrderingComparison.greaterThan(System.currentTimeMillis())));
+				assertThat(endTime, Is.is(OrderingComparison.greaterThan(System.currentTimeMillis())));
 			}
 
 		}
-		testSent();
+		testEventsDelivered();
 
-		assertThat(handlers[0].counter.get(), is(toSend));
-		assertThat(isRun.get(), is(true));
+		assertThat(handlers[0].counter.get(), Is.is(toSend));
+		assertThat(isRun.get(), Is.is(true));
 
 	}
 
@@ -242,27 +248,27 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 				te.seqNum = a++;
 				rb.publish(endSequence);
 			} else {
-				assertThat(endTime, is(OrderingComparison.greaterThan(System.currentTimeMillis())));
+				assertThat(endTime, Is.is(OrderingComparison.greaterThan(System.currentTimeMillis())));
 			}
 
 		}
-		testSent();
+		testEventsDelivered();
 
-		assertThat(handlers[0].counter.get(), is(toSend));
-		assertThat(shouldRunisRun.get(), is(true));
-		assertThat(shouldNotRunisRun.get(), is(false));
+		assertThat(handlers[0].counter.get(), Is.is(toSend));
+		assertThat(shouldRunisRun.get(), Is.is(true));
+		assertThat(shouldNotRunisRun.get(), Is.is(false));
 
 	}
 
-	static int count = 0;
-
 	@Test
-	public void invokeAll() throws Exception {
+	public void shouldRunAll() throws Exception {
 		int toRunCount = 1000;
+		final AtomicLong count = new AtomicLong();
 		final ScheduledExecutorService ses = nioWaitStrategy.getScheduledExecutor();
-		class CC implements Callable<AtomicBoolean> {
+		final class CC implements Callable<AtomicBoolean> {
+
 			final AtomicBoolean hasRun = new AtomicBoolean(false);
-			final int counter = count++;
+			final long counter = count.getAndIncrement();
 
 			@Override
 			public AtomicBoolean call() throws Exception {
@@ -272,13 +278,13 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 			}
 
 		}
-		ArrayList<CC> runList = new ArrayList<>();
+		final ArrayList<CC> runList = new ArrayList<>();
 		List<Future<AtomicBoolean>> list = null;
 		for (int a = 0; a < toRunCount; a++) {
 			runList.add(new CC());
 		}
 		long endSequence = 0;
-		long endTime = System.currentTimeMillis() + toSend * 1000L / 100000L;
+		final long endTime = System.currentTimeMillis() + toSend * 1000L / 100000L;
 		for (int a = 0; a < toSend;) {
 			if (rb.hasAvailableCapacity(1)) {
 				endSequence = rb.tryNext();
@@ -286,20 +292,23 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 				te.seqNum = a++;
 				rb.publish(endSequence);
 			} else {
-				assertThat(endTime, is(OrderingComparison.greaterThan(System.currentTimeMillis())));
+				assertThat(endTime, Is.is(OrderingComparison.greaterThan(System.currentTimeMillis())));
 			}
 			if (a == 1) {
+				// run all the tests in the list after the first event which Is.is sent.
 				list = ses.invokeAll(runList);
 			}
 
 		}
-		testSent();
-		assertThat(handlers[0].counter.get(), is(toSend));
+		testEventsDelivered();
+		assertThat(handlers[0].counter.get(), Is.is(toSend));
 		for (int a = 0; a < toRunCount; a++) {
-			assertThat(" counter:" + a, runList.get(a).hasRun.get(), is(true));
-			assertThat(list.get(a).isDone(), is(true));
-			assertThat("" + list.get(a), list.get(a).isCancelled(), is(false));
-			assertThat(" counter:" + a, list.get(a).get().get(), is(true));
+			assertThat(" counter:" + a, runList.get(a).hasRun.get(), Is.is(true));
+			assertThat(list.get(a).isDone(), Is.is(true));
+			if (list.get(a).isCancelled() == true) {
+				Assert.fail("isCancelled:" + list.get(a));
+			}
+			assertThat(" counter:" + a, list.get(a).get().get(), Is.is(true));
 		}
 
 	}

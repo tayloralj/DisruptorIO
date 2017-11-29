@@ -10,14 +10,12 @@
  *******************************************************************************/
 package com.ajt.disruptorIO;
 
-import static org.hamcrest.CoreMatchers.is;
 import static org.junit.Assert.assertThat;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketException;
@@ -33,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.hamcrest.core.Is;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -231,7 +230,7 @@ public class NIOWaitSelectorHighPerformanceServer {
 				}
 			}
 			lt.stop();
-			assertThat(handlers[0].counter.get(), is(toSend));
+			assertThat(handlers[0].counter.get(), Is.is(toSend));
 			long end = System.nanoTime();
 			for (int c = 0; c < clients; c++) {
 				logger.info("Complete Took(ms):{} DataSend:{} rate:{} MBwritten:{} rate:{}",

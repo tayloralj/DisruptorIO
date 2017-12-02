@@ -158,14 +158,33 @@ public class NIOWaitSelector2NIO {
 
 	@After
 	public void teardown() {
-		disruptorServer.shutdown();
 		try {
+			disruptorServer.shutdown();
 			nioWaitStrategyServer.close();
 		} catch (Exception e) {
 			logger.info("Error closing nioWait", e);
 		}
-		handlers = null;
+		try {
+			disruptorClient.shutdown();
+			nioWaitStrategyClient.close();
+		} catch (Exception e) {
+			logger.info("Error closing nioWait", e);
+		}
+		try {
+			if (handlers != null) {
+				for (int a = 0; a < handlers.length; a++) {
+					if (handlers[a] != null) {
+						handlers[a].closeServer();
+					}
+					handlers[a] = null;
+				}
+				handlers = null;
+			}
+		} catch (Exception e) {
+
+		}
 		threadFactoryServer = null;
+		threadFactoryClient = null;
 	}
 
 	@Test
@@ -203,16 +222,13 @@ public class NIOWaitSelector2NIO {
 			socketChannel.bind(null, 0);
 
 			// pass to the disruptor thread.
-			nioWaitStrategyServer.getScheduledExecutor().execute(new Runnable() {
-
-				@Override
-				public void run() {
-					try {
-						handlers[0].newServer(socketChannel);
-					} catch (Exception e) {
-						logger.error("Error starting server", e);
-					}
+			nioWaitStrategyServer.getScheduledExecutor().execute(() -> {
+				try {
+					handlers[0].newServer(socketChannel);
+				} catch (Exception e) {
+					logger.error("Error starting server", e);
 				}
+
 			});
 
 			// create a client set using the client disruptor
@@ -220,16 +236,13 @@ public class NIOWaitSelector2NIO {
 					nioWaitStrategyClient);
 
 			// pass to the disruptor thread - start command on correct thread callback
-			nioWaitStrategyClient.getScheduledExecutor().execute(new Runnable() {
-
-				@Override
-				public void run() {
-					try {
-						tc.start();
-					} catch (Exception e) {
-						logger.error("Error starting server", e);
-					}
+			nioWaitStrategyClient.getScheduledExecutor().execute(() -> {
+				try {
+					tc.start();
+				} catch (Exception e) {
+					logger.error("Error starting server", e);
 				}
+
 			});
 			// wait to connect before sending
 			Thread.sleep(50);
@@ -292,28 +305,23 @@ public class NIOWaitSelector2NIO {
 			}
 			assertThat("Message count did not all get delivered by disruptor to client, slow or blocked client ? ",
 					handlers[0].counter.get(), Matchers.is(toSend));
-			nioWaitStrategyClient.getScheduledExecutor().execute(new Runnable() {
-
-				@Override
-				public void run() {
-					try {
-						tc.dump();
-					} catch (Exception e) {
-						logger.error("Error starting server", e);
-					}
+			nioWaitStrategyClient.getScheduledExecutor().execute(() -> {
+				try {
+					tc.dump();
+				} catch (Exception e) {
+					logger.error("Error starting server", e);
 				}
+
 			});
-			// pass to the disruptor thread.
-			nioWaitStrategyServer.getScheduledExecutor().execute(new Runnable() {
 
-				@Override
-				public void run() {
-					try {
-						handlers[0].closeServer();
-					} catch (Exception e) {
-						logger.error("Error starting server", e);
-					}
+			// pass to the disruptor thread.
+			nioWaitStrategyServer.getScheduledExecutor().execute(() -> {
+				try {
+					handlers[0].closeServer();
+				} catch (Exception e) {
+					logger.error("Error starting server", e);
 				}
+
 			});
 			Thread.sleep(10);
 		} finally {

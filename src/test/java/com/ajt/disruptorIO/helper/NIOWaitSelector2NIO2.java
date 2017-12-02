@@ -110,8 +110,8 @@ public class NIOWaitSelector2NIO2 {
 	@After
 	public void teardown() {
 		logger.info("Teardown");
-		disruptorServer.shutdown();
 		try {
+			disruptorServer.shutdown();
 			nioWaitStrategyServer.close();
 		} catch (Exception e) {
 			logger.info("Error closing nioWait", e);
@@ -120,17 +120,16 @@ public class NIOWaitSelector2NIO2 {
 			handlers[a].close();
 			handlers[a] = null;
 		}
-		handlers = null;
 
-		threadFactoryServer = null;
-
-		disruptorClient.shutdown();
 		try {
+			disruptorClient.shutdown();
 			nioWaitStrategyClient.close();
 		} catch (Exception e) {
 			logger.info("Error closing nioWait", e);
 		}
 		threadFactoryClient = null;
+		threadFactoryServer = null;
+		handlers = null;
 
 	}
 

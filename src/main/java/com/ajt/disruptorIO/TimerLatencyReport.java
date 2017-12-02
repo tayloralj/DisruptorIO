@@ -45,7 +45,7 @@ final class TimerLatencyReport {
 		timerList.add(th);
 	}
 
-	class TimerLatencyCallbackImpl implements TimerCallback {
+	final class TimerLatencyCallbackImpl implements TimerCallback {
 
 		@Override
 		public void timerCallback(final long dueAt, final long currentNanoTime) {

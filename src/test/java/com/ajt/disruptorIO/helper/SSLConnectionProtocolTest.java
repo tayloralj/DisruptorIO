@@ -345,7 +345,6 @@ public class SSLConnectionProtocolTest {
 
 	@Test
 	public void testServerConnectionFull() throws Exception {
-		final long toSend = 20_000_000L;
 		final long messageratePerSecond = 200_000_000L;
 		final long readRatePerSecond = 1_000000L;
 		final long writeRatePerSecond = 1_000000L;
@@ -360,7 +359,6 @@ public class SSLConnectionProtocolTest {
 
 	@Test
 	public void testServerConnectionLossy() throws Exception {
-		final long toSend = 20_000_000L;
 		final long messageratePerSecond = 1_000_000;
 		final long readRatePerSecond = 1_000_000_000L;
 		final long writeRatePerSecond = 1_000L;
@@ -375,7 +373,6 @@ public class SSLConnectionProtocolTest {
 
 	@Test
 	public void testServerConnection10Full() throws Exception {
-		final long toSend = 10_000_000L;
 		final long messageratePerSecond = 100_000L;
 		final long readRatePerSecond = 1_000_000_000L;
 		final long writeRatePerSecond = 1_000L;
@@ -390,7 +387,6 @@ public class SSLConnectionProtocolTest {
 
 	@Test
 	public void testServerConnection10Lossy() throws Exception {
-		final long toSend = 10_000_000L;
 		final long messageratePerSecond = 500_000L;
 		final long readRatePerSecond = 1_000_000L;
 		final long writeRatePerSecond = 1_000L;
@@ -402,10 +398,9 @@ public class SSLConnectionProtocolTest {
 		disruptorServer.handleEventsWith(handlers);
 		testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy);
 	}
-
+final long toSend=10000;
 	@Test
 	public void testServerConnection10_20Full() throws Exception {
-		final long toSend = 10_000_000L;
 		final long messageratePerSecond = 500_000L;
 		final long readRatePerSecond = 1_000000L;
 		final long writeRatePerSecond = 1_000L;
@@ -420,7 +415,6 @@ public class SSLConnectionProtocolTest {
 
 	@Test
 	public void testServerConnection10_20Lossy() throws Exception {
-		final long toSend = 10_000_000L;
 		final long messageratePerSecond = 5000_000L;
 		final long readRatePerSecond = 1_00000_000L;
 		final long writeRatePerSecond = 1_000L;

@@ -514,7 +514,7 @@ public class SSLConnectionTest {
 	public void testServerConnectionRatePerCipher() throws Exception {
 		sslContext = setupContext("password", "resources/client.jks", "resources/client.truststore");
 
-		final long toSend = 10_000_000L;
+		final long toSend = 100_000L;
 		final long messageratePerSecond = 1_000_000L; // high
 		final long readRatePerSecond = 1_000_000_000L; // high
 		final long writeRatePerSecond = 1_000L; //

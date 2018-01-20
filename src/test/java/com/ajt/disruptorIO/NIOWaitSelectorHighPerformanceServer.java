@@ -144,23 +144,23 @@ public class NIOWaitSelectorHighPerformanceServer {
 							+ "exceptionHandler={}...",
 					disruptor.getRingBuffer().getBufferSize(), nioWaitStrategy.getClass().getSimpleName(),
 					errorHandler);
+			nioWaitStrategy.getScheduledExecutor().execute(() -> {
+				lt.register(nioWaitStrategy);
+
+			});
+
 			disruptor.start();
-			lt.register(nioWaitStrategy);
 
 			final RingBuffer<TestEvent> rb = disruptor.getRingBuffer();
 			socketChannel.configureBlocking(false);
 			socketChannel.bind(null, 0);
 
 			// pass to the disruptor thread.
-			nioWaitStrategy.getScheduledExecutor().execute(new Runnable() {
-
-				@Override
-				public void run() {
-					try {
-						handlers[0].newServer(socketChannel);
-					} catch (Exception e) {
-						logger.error("Error starting server", e);
-					}
+			nioWaitStrategy.getScheduledExecutor().execute(() -> {
+				try {
+					handlers[0].newServer(socketChannel);
+				} catch (Exception e) {
+					logger.error("Error starting server", e);
 				}
 			});
 
@@ -245,16 +245,13 @@ public class NIOWaitSelectorHighPerformanceServer {
 				tc[c].close();
 			}
 			// pass to the disruptor thread.
-			nioWaitStrategy.getScheduledExecutor().execute(new Runnable() {
-
-				@Override
-				public void run() {
-					try {
-						handlers[0].close();
-					} catch (Exception e) {
-						logger.error("Error starting server", e);
-					}
+			nioWaitStrategy.getScheduledExecutor().execute(() -> {
+				try {
+					handlers[0].close();
+				} catch (Exception e) {
+					logger.error("Error starting server", e);
 				}
+
 			});
 			Thread.sleep(10);
 		} finally {
@@ -294,73 +291,66 @@ public class NIOWaitSelectorHighPerformanceServer {
 			final OutputStream os = s.getOutputStream();
 			final long startTimeNanos = System.nanoTime();
 			// blocking - forces clients to keep running.
-			readThread = new Thread(new Runnable() {
+			readThread = new Thread(() -> {
+				try {
+					final byte[] readArray = new byte[1024];
+					while (isRunning.get()) {
+						final long currentTimeNanos = System.nanoTime();
+						readShouldBeAtLeast
+								.set(readRatePerSecond * ((currentTimeNanos - startTimeNanos) / 1000_000_000L));
+						if (bytesRead.get() < readShouldBeAtLeast.get()) {
 
-				@Override
-				public void run() {
-					try {
-						final byte[] readArray = new byte[1024];
-						while (isRunning.get()) {
-							final long currentTimeNanos = System.nanoTime();
-							readShouldBeAtLeast
-									.set(readRatePerSecond * ((currentTimeNanos - startTimeNanos) / 1000_000_000L));
-							if (bytesRead.get() < readShouldBeAtLeast.get()) {
-
-								final int bytesReadCycle = is.read(readArray);
-								if (bytesReadCycle == -1) {
-									logger.error("Socket closed - exit");
-									break;
-								}
-								bytesRead.addAndGet(bytesReadCycle);
-							} else {
-								Thread.sleep(1);
+							final int bytesReadCycle = is.read(readArray);
+							if (bytesReadCycle == -1) {
+								logger.error("Socket closed - exit");
+								break;
 							}
+							bytesRead.addAndGet(bytesReadCycle);
+						} else {
+							Thread.sleep(1);
 						}
-					} catch (SocketException se) {
-						logger.info("SocketClosed");
-					} catch (Exception e) {
-						logger.error("Error in read:", e);
 					}
-					try {
-						is.close();
-					} catch (Exception e) {
-						logger.error("erro during is close", e);
-					}
-
+				} catch (SocketException se) {
+					logger.info("SocketClosed");
+				} catch (Exception e) {
+					logger.error("Error in read:", e);
 				}
+				try {
+					is.close();
+				} catch (Exception e) {
+					logger.error("erro during is close", e);
+				}
+
 			});
 			readThread.setName("testClientReadThread-" + count);
 			readThread.start();
-			writeThread = new Thread(new Runnable() {
+			writeThread = new Thread(() -> {
+				try {
+					byte[] writeBytes = "Hello worldHello worldHello worldHello worldHello worldHello worldHelloworldHello worldHello worldHello world"
+							.getBytes();
+					while (isRunning.get()) {
+						final long currentTimeNanos = System.nanoTime();
+						writeShouldBeAtLeast
+								.set(writeRatePerSecond * ((currentTimeNanos - startTimeNanos) / 1_000_000_000L));
+						if (bytesWritten.get() < writeShouldBeAtLeast.get()) {
 
-				@Override
-				public void run() {
-					try {
-						byte[] writeBytes = "Hello worldHello worldHello worldHello worldHello worldHello worldHelloworldHello worldHello worldHello world"
-								.getBytes();
-						while (isRunning.get()) {
-							final long currentTimeNanos = System.nanoTime();
-							writeShouldBeAtLeast
-									.set(writeRatePerSecond * ((currentTimeNanos - startTimeNanos) / 1_000_000_000L));
-							if (bytesWritten.get() < writeShouldBeAtLeast.get()) {
-
-								os.write(writeBytes);
-								bytesWritten.addAndGet(writeBytes.length);
-							} else {
-								Thread.sleep(1);
-							}
+							os.write(writeBytes);
+							bytesWritten.addAndGet(writeBytes.length);
+						} else {
+							Thread.sleep(1);
 						}
-					} catch (SocketException se) {
-						logger.info("SocketClosed");
-					} catch (Exception e) {
-						logger.error("Error in read:", e);
 					}
-					try {
-						os.close();
-					} catch (Exception e) {
-						logger.error("erro during os close", e);
-					}
+				} catch (SocketException se) {
+					logger.info("SocketClosed");
+				} catch (Exception e) {
+					logger.error("Error in read:", e);
 				}
+				try {
+					os.close();
+				} catch (Exception e) {
+					logger.error("erro during os close", e);
+				}
+
 			});
 			writeThread.setName("testClientWriteThread-" + count);
 

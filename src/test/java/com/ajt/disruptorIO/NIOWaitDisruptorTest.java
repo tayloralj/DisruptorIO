@@ -121,7 +121,6 @@ public class NIOWaitDisruptorTest {
 			setup();
 			shouldWaitForValue();
 		}
-
 	}
 
 	@Test
@@ -171,46 +170,43 @@ public class NIOWaitDisruptorTest {
 
 	@Test
 	public void assertThreadTest() throws Exception {
-		NIOWaitStrategy nioWaitStrategy = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true, true, true);
-		SequenceUpdater sequenceUpdater = new SequenceUpdater(120, nioWaitStrategy);
-		EXECUTOR.execute(sequenceUpdater);
-		sequenceUpdater.waitForStartup();
-		Sequence cursor = new Sequence(0);
-		long sequence = nioWaitStrategy.waitFor(0, cursor, sequenceUpdater.sequence, new DummySequenceBarrier());
-		assertThat(sequence, Matchers.is(0L));
-		final AtomicBoolean caughtException = new AtomicBoolean(false);
-		final Thread t = new Thread(new Runnable() {
+		try (final NIOWaitStrategy nioWaitStrategy = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true, true,
+				true);) {
+			SequenceUpdater sequenceUpdater = new SequenceUpdater(120, nioWaitStrategy);
+			EXECUTOR.execute(sequenceUpdater);
+			sequenceUpdater.waitForStartup();
+			Sequence cursor = new Sequence(0);
+			long sequence = nioWaitStrategy.waitFor(0, cursor, sequenceUpdater.sequence, new DummySequenceBarrier());
+			assertThat(sequence, Matchers.is(0L));
+			final AtomicBoolean caughtException = new AtomicBoolean(false);
 
-			@Override
-			public void run() {
+			final Thread tempThread = new Thread(() -> {
 				// deliberately call the timer check from another thread
 				nioWaitStrategy.checkTimer();
+			});
+			tempThread.setName("test should run from another thread test");
+			tempThread.setUncaughtExceptionHandler(new UncaughtExceptionHandler() {
+
+				@Override
+				public void uncaughtException(Thread t, Throwable e) {
+
+					// expect to get callback of exception
+					logger.info("Caught as expected thread:{} throwable:{}", t, e);
+					caughtException.set(true);
+				}
+
+			});
+			tempThread.start();
+			tempThread.join(100);
+			// confirm thread completed
+			if (tempThread.isAlive()) {
+				Assert.fail("Error thread didn't quit");
 			}
-		});
-		t.setName("test should run from another thread test");
-		t.setUncaughtExceptionHandler(new UncaughtExceptionHandler() {
+			// confirm that we got an exception
 
-			@Override
-			public void uncaughtException(Thread t, Throwable e) {
+			assertThat("Error didnt fail exception caused by wrong thread", caughtException, Matchers.is(true));
 
-				// expect to get callback of exception
-				logger.info("Caught");
-				caughtException.set(true);
-			}
-
-		});
-		t.start();
-		t.join(100);
-		// confirm thread completed
-		if (t.isAlive()) {
-			Assert.fail("ERror thread didn't quit");
 		}
-		// confirm that we got an exception
-		if (caughtException.get() == false) {
-			Assert.fail("Error didnt fail exception caused by wrong thread");
-		}
-
-		nioWaitStrategy.close();
 	}
 
 	@Test
@@ -227,7 +223,6 @@ public class NIOWaitDisruptorTest {
 	}
 
 	private class TestEventHandler implements EventHandler<TestEvent> {
-		private final Logger logger = LoggerFactory.getLogger(TestEventHandler.class);
 		private AtomicLong counter = new AtomicLong(0);
 		private AtomicLong total = new AtomicLong(0);
 		private long lastEvent = 11;

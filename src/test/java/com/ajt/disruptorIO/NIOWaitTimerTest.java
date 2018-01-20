@@ -14,19 +14,22 @@
 package com.ajt.disruptorIO;
 
 import static org.hamcrest.CoreMatchers.is;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.hamcrest.Matchers;
 import org.hamcrest.core.Is;
 import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.ajt.disruptorIO.NIOWaitStrategy;
 import com.ajt.disruptorIO.NIOWaitStrategy.NIOClock;
 import com.ajt.disruptorIO.NIOWaitStrategy.TimerCallback;
 import com.ajt.disruptorIO.NIOWaitStrategy.TimerHandler;
@@ -192,6 +195,40 @@ public class NIOWaitTimerTest {
 			}
 
 		} finally {
+		}
+	}
+
+	@Test
+	public void testBadThreadTimers() throws Exception {
+		nanoTime = 0;
+		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock, false, false, true)) {
+			final TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
+			final TimerHandler thList[] = new TimerHandler[tcList.length];
+			for (int a = 0; a < tcList.length; a++) {
+				tcList[a] = new TimerCallbackImpl("a:" + a);
+				thList[a] = waitStrat.createTimer(tcList[a], "tc:" + a);
+				thList[a].fireIn(50);
+			}
+			final Thread t = new Thread(() -> {
+				// expect timer to throw an exception as the cancel was not on the reactor
+				// thread
+				thList[0].cancelTimer();
+				Assert.fail("Didnt get exception when cancelling on wrong thread");
+			});
+			final AtomicBoolean hasThrown = new AtomicBoolean(false);
+			t.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+
+				@Override
+				public void uncaughtException(Thread t, Throwable e) {
+					hasThrown.set(true);
+				}
+			});
+
+			t.start();
+			t.join(100);
+
+			assertTrue("Error did not throw exception", hasThrown.get());
+
 		}
 	}
 
@@ -379,7 +416,8 @@ public class NIOWaitTimerTest {
 			calledAt = currentNanoTime;
 			calledCount++;
 			assertThat(currentNanoTime, Matchers.greaterThanOrEqualTo(dueAt));
-	//		logger.info("TimerCallback fired:{} dueAt:{} actualAt:{} name:{}", calledCount, dueAt, calledAt, name);
+			// logger.info("TimerCallback fired:{} dueAt:{} actualAt:{} name:{}",
+			// calledCount, dueAt, calledAt, name);
 		}
 
 	}

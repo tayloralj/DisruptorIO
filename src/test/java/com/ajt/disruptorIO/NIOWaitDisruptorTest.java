@@ -204,7 +204,7 @@ public class NIOWaitDisruptorTest {
 			}
 			// confirm that we got an exception
 
-			assertThat("Error didnt fail exception caused by wrong thread", caughtException, Matchers.is(true));
+			assertThat("Error didnt fail exception caused by wrong thread", caughtException.get(), Matchers.is(true));
 
 		}
 	}

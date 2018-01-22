@@ -142,7 +142,7 @@ public class NIOWaitTimerTest {
 	private class TimerCallbackImpl implements TimerCallback {
 		long calledAt = -1;
 		long calledCount = 0;
-		String name = "";
+		final String name;
 
 		public TimerCallbackImpl(final String nm) {
 			this.name = nm;
@@ -356,7 +356,7 @@ public class NIOWaitTimerTest {
 	public void benchmmarkCancelTimers() {
 		nanoTime = 0;
 		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock);) {
-			final TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
+			final TimerCallbackImpl tcList[] = new TimerCallbackImpl[500];
 			final TimerHandler thList[] = new TimerHandler[tcList.length];
 			for (int a = 0; a < tcList.length; a++) {
 				tcList[a] = new TimerCallbackImpl("a:" + a);

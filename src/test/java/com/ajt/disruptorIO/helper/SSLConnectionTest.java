@@ -12,7 +12,9 @@ package com.ajt.disruptorIO.helper;
 
 import static org.junit.Assert.assertThat;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
 import java.net.Socket;
 import java.net.URL;
 import java.nio.ByteBuffer;
@@ -21,8 +23,10 @@ import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.util.Enumeration;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
 
 import javax.net.ssl.KeyManagerFactory;
@@ -275,6 +279,7 @@ public class SSLConnectionTest {
 			final RingBuffer<TestEvent> rb = disruptorServer.getRingBuffer();
 			boolean connected = false;
 			while (!connected) {
+				Assert.assertThat("Client not running", tc.isClosed(), Matchers.is(false));
 				connected = true;
 
 				for (int a = 0; a < tc.clients.length; a++) {
@@ -283,7 +288,7 @@ public class SSLConnectionTest {
 					}
 				}
 				final long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTimeNanos);
-				Assert.assertThat("not  connected in time", elapsed, Matchers.lessThan(300L + 200 * tc.clients.length));
+				Assert.assertThat("not  connected in time", elapsed, Matchers.lessThan(300L + 400 * tc.clients.length));
 			}
 			logger.info("All connected");
 			while (actualMessageSendCount < messagesToSend) {
@@ -402,8 +407,22 @@ public class SSLConnectionTest {
 			logger.warn("Not exepecting callback");
 		}
 
+		boolean isClosed() {
+			boolean isClosed = false;
+			if (isRunning == false)
+				isClosed = true;
+			for (int a = 0; a < clients.length; a++) {
+				if (clients[a].isClosed) {
+					isClosed = true;
+				}
+			}
+			return isClosed;
+		}
+
 		void start() {
 			try {
+				isRunning = true;
+
 				logger.info("Start");
 				for (int a = 0; a < count; a++) {
 
@@ -413,6 +432,7 @@ public class SSLConnectionTest {
 			} catch (Exception e) {
 				logger.error("Error during start", e);
 				Assert.fail("fail during start;" + e);
+				close();
 			}
 		}
 
@@ -514,41 +534,60 @@ public class SSLConnectionTest {
 	public void testServerConnectionRatePerCipher() throws Exception {
 		sslContext = setupContext("password", "resources/client.jks", "resources/client.truststore");
 
-		final long toSend = 100_000L;
+		final long toSend = 1000_000L;
 		final long messageratePerSecond = 1_000_000L; // high
 		final long readRatePerSecond = 1_000_000_000L; // high
 		final long writeRatePerSecond = 1_000L; //
-		final int clientCount = 2;
+		final int[] clientCount = new int[] { 1, 2, 4, 8, 16 };
 		final boolean lossy = true;
 		String cph = "";
 		// cph="TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA";
 		// cph = null;
-		SSLParameters sslP = SSLContext.getDefault().getSupportedSSLParameters();
+		final SSLParameters sslP = SSLContext.getDefault().getSupportedSSLParameters();
 
 		final String[] suites = sslP.getCipherSuites();
-		for (int a = 0; a < suites.length; a++) {
-			cph = suites[a];
-			try {
-				setup();
-				long start = System.currentTimeMillis();
+		InetSocketAddress[] address = new InetSocketAddress[] { null, null };
 
-				sslP.setCipherSuites(new String[] { cph });
-				sslP.setUseCipherSuitesOrder(true);
-				SSLTCPSenderHelper sslTCP = new SSLTCPSenderHelper(nioWaitStrategyServer, sslContext, sslP);
-				handlers = new ServerConnectionHelper[] {
-						new ServerConnectionHelper(sslTCP, lossy, null, clientCount) };
-				disruptorServer.handleEventsWith(handlers);
-				testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond, clientCount, lossy,
-						cph);
-				long finish = System.currentTimeMillis();
-				logger.info("SUCCESS took:" + (finish - start) + " cph:" + cph);
-			} catch (AssertionError | IllegalStateException ae) {
-				logger.error("ERROR FAILED " + cph, ae);
-			} finally {
-				teardown();
+		Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+		{
+			while (interfaces.hasMoreElements()) {
+				NetworkInterface nic = interfaces.nextElement();
+				Enumeration<InetAddress> addresses = nic.getInetAddresses();
+				while (address == null && addresses.hasMoreElements()) {
+					InetAddress address2 = addresses.nextElement();
+					if (!address2.isLoopbackAddress()) {
+						address[1] = new InetSocketAddress(address2.getHostName(), 0);
+					}
+				}
 			}
 		}
-		setup();
+		for (int c = 0; c < address.length; c++) {
+			for (int b = 0; b < clientCount.length; b++) {
+				for (int a = 0; a < suites.length; a++) {
+					cph = suites[a];
+					try {
+						setup();
+						long start = System.currentTimeMillis();
+						logger.info("TRYING CIPHER:{}", cph);
+						sslP.setCipherSuites(new String[] { cph });
+						sslP.setUseCipherSuitesOrder(true);
+						SSLTCPSenderHelper sslTCP = new SSLTCPSenderHelper(nioWaitStrategyServer, sslContext, sslP);
+						handlers = new ServerConnectionHelper[] {
+								new ServerConnectionHelper(sslTCP, lossy, address[c], clientCount[b]) };
+						disruptorServer.handleEventsWith(handlers);
+						testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond,
+								clientCount[b], lossy, cph);
+						long finish = System.currentTimeMillis();
+						logger.info("SUCCESS took:" + (finish - start) + " cph:" + cph);
+					} catch (AssertionError | IllegalStateException ae) {
+						logger.error("ERROR FAILED " + cph, ae);
+					} finally {
+						teardown();
+					}
+				}
+				setup();
+			}
+		}
 
 	}
 

@@ -498,6 +498,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		final Histogram lateBy;
 		boolean isRegistered = false;
 		long cancelCount;
+		long registerCount;
 		long nanoTimeWillFireAfter;
 
 		public MyTimerHandler(final TimerCallback callback, final String name) {
@@ -558,12 +559,13 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 				throw new RuntimeException("Error timer was not added to heap:" + timerName);
 			}
 			isRegistered = true;
+			registerCount++;
 			return true;
 		}
 
 		@Override
 		public boolean fireIn(final long relTimeNano) {
-			checkThreadIfStarted();
+
 			return fireAt(currentTimeNanos + relTimeNano);
 		}
 
@@ -589,7 +591,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 		public String toString() {
 			return "Timer:" + timerName + " canceled:" + cancelCount + " fired:" + timerHistogram.getCount()
-					+ " isRegistered:" + isRegistered;
+					+ " registerCount:" + registerCount + " isRegistered:" + isRegistered;
 		}
 
 		String getTimerName() {

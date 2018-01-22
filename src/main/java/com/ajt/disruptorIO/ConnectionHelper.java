@@ -16,9 +16,15 @@ import java.net.SocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 
+/**
+ * interface to define a wrapper around the raw NIO events to create a socket
+ * session and auto flush the data as the sockets become readable/writable. all
+ * the callin's and callbacks should be done on the same thread
+ */
+
 public interface ConnectionHelper {
 
-	public int DEFAULT_BUFFER = 64 * 1024;
+	public int DEFAULT_BUFFER = 1024 * 1024;
 	/**
 	 * milliseconds to wait before closing a socket which doesn't have an ssl
 	 * session setup
@@ -47,9 +53,10 @@ public interface ConnectionHelper {
 	 *
 	 */
 	public interface SenderCallin extends AutoCloseable {
-
+		/** address currently connected to */
 		public SocketAddress getRemoteAddress();
 
+		/** local address of the connection */
 		public SocketAddress getLocalAddress();
 
 		/**
@@ -102,7 +109,7 @@ public interface ConnectionHelper {
 		public void close();
 	}
 
-	/** callbacks to be recieved by the client at any time */
+	/** callbacks to be received by the client at any time */
 	public interface SenderCallback {
 		/**
 		 * when connected to endpoint, either as server socket or connection to remote

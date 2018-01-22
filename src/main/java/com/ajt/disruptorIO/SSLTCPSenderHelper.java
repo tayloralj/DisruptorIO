@@ -52,6 +52,13 @@ import com.ajt.disruptorIO.NIOWaitStrategy.TimerCallback;
 import com.ajt.disruptorIO.NIOWaitStrategy.TimerHandler;
 import com.google.common.io.Resources;
 
+/**
+ * help to create tls connections uses the java ssl engine, and wraps/unwraps
+ * the data so it can be sent through the single threaded api.
+ * 
+ * @author ajt
+ *
+ */
 public class SSLTCPSenderHelper implements ConnectionHelper {
 	protected final Logger logger = LoggerFactory.getLogger(SSLTCPSenderHelper.class);
 	protected NIOWaitStrategy wait;
@@ -80,6 +87,21 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		sslParameters = params;
 	}
 
+	/**
+	 * create a connection and pass in the tls connection details for use.
+	 * 
+	 * @param waiter
+	 * @param keyStoreFile
+	 * @param trustStoreFile
+	 * @param passwd
+	 * @param debug
+	 * @throws KeyStoreException
+	 * @throws CertificateException
+	 * @throws NoSuchAlgorithmException
+	 * @throws IOException
+	 * @throws UnrecoverableEntryException
+	 * @throws KeyManagementException
+	 */
 	public SSLTCPSenderHelper(//
 			final NIOWaitStrategy waiter, //
 			final String keyStoreFile, //
@@ -390,7 +412,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				if (socketConnectTimeoutHandler.isRegistered()) {
 					socketConnectTimeoutHandler.cancelTimer();
 				} else {
-					logger.error("Error was expectint timer to be registered during timeout");
+					logger.error("Error was expectint timer to be registered during timeout {}",socketConnectTimeoutHandler);
 				}
 				setKeyStatus();
 				break;
@@ -523,6 +545,8 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				isWriteBlocked = false;
 
 				sk.interestOps(SelectionKey.OP_READ);
+				
+				socketConnectTimeoutHandler.fireIn(TimeUnit.MILLISECONDS.toNanos(SSL_TIMEOUT));
 			} catch (Exception ioe) {
 				logger.error("Error finishing connection", ioe);
 				close();

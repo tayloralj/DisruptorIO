@@ -69,9 +69,12 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	final Selector selector;
 
 	private final HashMap<SelectorCallback, Histogram> timerCallback;
+	private final Histogram waitHisto;
 	private long startNIOTime = 0;
+	private long startWaitTime = 0;
+	private long endWaitTime = 0;
 	private long endNIOTime = 0;
-
+	private long selectCount = 0;
 	boolean isStarted = false;
 	boolean isClosed = false;
 	long currentTimeNanos = 0;
@@ -102,7 +105,8 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		this(clock, false, false, true);
 	}
 
-	public NIOWaitStrategy(final NIOClock clock, //
+	public NIOWaitStrategy(//
+			final NIOClock clock, //
 			final boolean timerStats, //
 			final boolean debugTimes, //
 			final boolean assertThread) {
@@ -113,10 +117,12 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		//
 		logger.info("Created NIOWait with clock:{}", clock);
 		timerHeap = new PriorityQueue<>(255);
-		timerLatencyReport = new TimerLatencyReport(this);
-		timerLatencyReport.timerHandler = createTimer(timerLatencyReport.callback, "TimerLatencyReport");
 		if (timerStats) {
+			timerLatencyReport = new TimerLatencyReport(this);
+			timerLatencyReport.timerHandler = createTimer(timerLatencyReport.callback, "TimerLatencyReport");
 			timerLatencyReport.timerHandler.fireIn(timerLatencyReport.timerReportInterval);
+		} else {
+			timerLatencyReport = null;
 		}
 
 		strategyExecutor = new NIOWaitStrategyExecutor(this);
@@ -133,8 +139,11 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 		}
 		if (debugTimes) {
 			timerCallback = new HashMap<>();
+			waitHisto = getHisto();
 			logger.info("DEBUGTIME ENABLED");
 		} else {
+			logger.info("DEBUGTIME CANCELLED");
+			waitHisto = null;
 			timerCallback = null;
 		}
 	}
@@ -152,7 +161,9 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			final Sequence cursor, //
 			final Sequence dependentSequence, //
 			final SequenceBarrier barrier) throws AlertException, InterruptedException, TimeoutException {
-
+		if (debugTimes) {
+			startWaitTime = System.nanoTime();
+		}
 		long availableSequence;
 		final long lastClock = currentTimeNanos;
 		setNanoTime();
@@ -171,7 +182,11 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 
 			checkTimer();
 		}
-		checkThread();
+		if (debugTimes) {
+			endWaitTime = System.nanoTime();
+			waitHisto.addObservation((endWaitTime - startWaitTime));
+		}
+
 		return availableSequence;
 
 	}
@@ -268,6 +283,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			assert (maxBlockMillis > 0);
 			final int keyCount = selector.select(maxBlockMillis);
 			if (keyCount == 0) {
+				selectCount++;
 				return false;
 			}
 			return checkSelectOutput();
@@ -289,6 +305,7 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			logger.trace("CheckNIO");
 			final int keyCount = selector.selectNow();
 			if (keyCount == 0) {
+				selectCount++;
 				return false;
 			}
 			return checkSelectOutput();
@@ -704,13 +721,13 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 					TimeUnit.NANOSECONDS.toMicros(timer.nanoTimeWillFireAfter - timer.currentNanoTime()));
 		}
 		if (debugTimes) {
-			logger.info("CALLBACK TIME DEBUG");
+			logger.info("DebugStats CALLBACK TIME DEBUG");
+			logger.info("WaitCallbacks selectCount:{} {}", selectCount, toStringHisto(waitHisto));
 			timerCallback.forEach(new BiConsumer<NIOWaitStrategy.SelectorCallback, Histogram>() {
 
 				@Override
 				public void accept(final NIOWaitStrategy.SelectorCallback t, final Histogram u) {
-					logger.info("NIOCALLBACK:{} histo:{}", t, toStringHisto(u));
-
+					logger.info("DumpStatsStats:{} histo:{}", t, toStringHisto(u));
 				}
 			});
 		}

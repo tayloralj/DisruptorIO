@@ -26,7 +26,6 @@ import java.security.cert.X509Certificate;
 import java.util.Enumeration;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
 
 import javax.net.ssl.KeyManagerFactory;
@@ -119,17 +118,17 @@ public class SSLConnectionTest {
 
 			}
 		};
-		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock());
-		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock());
-		int ringBufferSize = 2048;
-		disruptorServer = new Disruptor<>(TestEvent.EVENT_FACTORY, ringBufferSize, threadFactoryServer,
-				ProducerType.SINGLE, nioWaitStrategyServer);
-		disruptorServer.setDefaultExceptionHandler(errorHandler);
+		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true, true, true);
+		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true, true, true);
+		int ringBufferSize = 8192;
 
 		disruptorClient = new Disruptor<>(TestEvent.EVENT_FACTORY, ringBufferSize, threadFactoryClient,
 				ProducerType.SINGLE, nioWaitStrategyClient);
 		disruptorClient.setDefaultExceptionHandler(errorHandler);
 
+		disruptorServer = new Disruptor<>(TestEvent.EVENT_FACTORY, ringBufferSize, threadFactoryServer,
+				ProducerType.SINGLE, nioWaitStrategyServer);
+		disruptorServer.setDefaultExceptionHandler(errorHandler);
 	}
 
 	private static SSLContext setupContext(String passwd, String keyStoreFile, String trustStoreFile) throws Exception {
@@ -212,6 +211,7 @@ public class SSLConnectionTest {
 	public void teardown() {
 		logger.info("Teardown");
 		try {
+			logger.info("Teardown - Server");
 			disruptorServer.shutdown();
 			nioWaitStrategyServer.close();
 		} catch (Exception e) {
@@ -228,6 +228,7 @@ public class SSLConnectionTest {
 		}
 
 		try {
+			logger.info("Teardown - Client");
 			disruptorClient.shutdown();
 			nioWaitStrategyClient.close();
 		} catch (Exception e) {
@@ -243,7 +244,9 @@ public class SSLConnectionTest {
 			final long sendMessageRatePerSecond, //
 			final long readRatePerSecond, //
 			final long writeRatePerSecond, //
-			final int clients, final boolean lossy, final String cipher) throws Exception {
+			final int clients, //
+			final boolean lossy, //
+			final String cipher) throws Exception {
 		try {
 			logger.info("Disruptor creating new disruptor for this context. toSend:{} rateAt:{}", messagesToSend,
 					sendMessageRatePerSecond);
@@ -496,7 +499,7 @@ public class SSLConnectionTest {
 
 			@Override
 			public void onEvent(Object event, long sequence, boolean endOfBatch) throws Exception {
-
+				logger.error("Error client not expecting message");
 			}
 
 		});
@@ -534,10 +537,10 @@ public class SSLConnectionTest {
 	public void testServerConnectionRatePerCipher() throws Exception {
 		sslContext = setupContext("password", "resources/client.jks", "resources/client.truststore");
 
-		final long toSend = 1000_000L;
-		final long messageratePerSecond = 1_000_000L; // high
+		final long toSend = 1_0000_000L;
+		final long messageratePerSecond = 10_000_000L; // high
 		final long readRatePerSecond = 1_000_000_000L; // high
-		final long writeRatePerSecond = 1_000L; //
+		final long writeRatePerSecond = 1_000_000_000L; //
 		final int[] clientCount = new int[] { 1, 2, 4, 8, 16 };
 		final boolean lossy = true;
 		String cph = "";
@@ -546,21 +549,25 @@ public class SSLConnectionTest {
 		final SSLParameters sslP = SSLContext.getDefault().getSupportedSSLParameters();
 
 		final String[] suites = sslP.getCipherSuites();
-		InetSocketAddress[] address = new InetSocketAddress[] { null, null };
+		final InetSocketAddress[] address = new InetSocketAddress[] { null, null };
 
-		Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+		final Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
 		{
 			while (interfaces.hasMoreElements()) {
-				NetworkInterface nic = interfaces.nextElement();
-				Enumeration<InetAddress> addresses = nic.getInetAddresses();
+				final NetworkInterface nic = interfaces.nextElement();
+				final Enumeration<InetAddress> addresses = nic.getInetAddresses();
 				while (address == null && addresses.hasMoreElements()) {
 					InetAddress address2 = addresses.nextElement();
 					if (!address2.isLoopbackAddress()) {
-						address[1] = new InetSocketAddress(address2.getHostName(), 0);
+						address[1] = new InetSocketAddress(address2.getHostName(), 24000);
+						address[0] = new InetSocketAddress(address2.getHostName(), 24000);
 					}
 				}
 			}
-		}
+		}	
+		
+		address[0] =new InetSocketAddress("localhost", 23000);
+		address[0] =new InetSocketAddress("localhost", 22000);
 		for (int c = 0; c < address.length; c++) {
 			for (int b = 0; b < clientCount.length; b++) {
 				for (int a = 0; a < suites.length; a++) {
@@ -571,7 +578,8 @@ public class SSLConnectionTest {
 						logger.info("TRYING CIPHER:{}", cph);
 						sslP.setCipherSuites(new String[] { cph });
 						sslP.setUseCipherSuitesOrder(true);
-						SSLTCPSenderHelper sslTCP = new SSLTCPSenderHelper(nioWaitStrategyServer, sslContext, sslP);
+						final SSLTCPSenderHelper sslTCP = new SSLTCPSenderHelper(nioWaitStrategyServer, sslContext,
+								sslP);
 						handlers = new ServerConnectionHelper[] {
 								new ServerConnectionHelper(sslTCP, lossy, address[c], clientCount[b]) };
 						disruptorServer.handleEventsWith(handlers);
@@ -585,7 +593,7 @@ public class SSLConnectionTest {
 						teardown();
 					}
 				}
-				setup();
+
 			}
 		}
 

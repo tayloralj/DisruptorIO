@@ -63,7 +63,8 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 	 * @param maxClientCount
 	 */
 	public ServerConnectionHelper(final ConnectionHelper serverSenderHelper, //
-			final boolean compact, final InetSocketAddress address, //
+			final boolean compact, //
+			final InetSocketAddress address, //
 			final int maxClientCount) {
 		coalsce = compact;
 		this.serverSenderHelper = serverSenderHelper;
@@ -140,6 +141,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 				elapsedHisto.getCount(), TestEvent.toStringHisto(elapsedHisto), //
 				delayHisto.getCount(), TestEvent.toStringHisto(delayHisto));
 
+		serverCallin.close();
 		for (int a = 0; a < ecc.length; a++) {
 			if (ecc[a] != null) {
 				logger.info("closeServer id:{} ", a);
@@ -191,7 +193,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 
 		@Override
 		public void writeUnblocked(final ConnectionHelper.SenderCallin callin) {
-			// logger.info("unblocked Server write callin:{}", callin);
+			logger.info("unblocked Server write callin:{}", callin);
 			serverCallin.unblockRead();
 		}
 
@@ -208,7 +210,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		@Override
 		public void readData(final ConnectionHelper.SenderCallin callin, final ByteBuffer buffer) {
 			try {
-				// logger.info("readData callin:{} buffer:{}", callin, buffer);
+				logger.trace("readData callin:{} buffer:{}", callin, buffer);
 				ecc[callin.getId()].read(buffer);
 			} catch (Exception e) {
 				logger.error("Error reading buffer", e);
@@ -226,7 +228,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 	 * @author ajt
 	 *
 	 */
-	private static class EstablishedServerConnectionCallback implements AutoCloseable {
+	private class EstablishedServerConnectionCallback implements AutoCloseable {
 		private final Logger logger = LoggerFactory
 				.getLogger(ServerConnectionHelper.EstablishedServerConnectionCallback.class);
 
@@ -278,6 +280,13 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 					final long bytesWritten = serverCallin.flush();
 					if (bytesWritten > 0) {
 						totalBytesWritten += bytesWritten;
+						if (serverCallin.isReadBlocked()>0)
+						{
+							serverCallin.unblockRead();
+						}
+						if (serverCallin.isWriteBlocked()>0) {
+							serverCallin.unblockRead();
+						}
 					}
 					writeSignalCount++;
 
@@ -290,34 +299,19 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 
 		public void handleData(final TestEvent event, final long sequence, final boolean endOfBatch) throws Exception {
 			messageCount++;
-			long flushed = 0;
-			if (serverCallin.bufferRemaining() < event.getLength()) {
-				if (coalsce) {
-					// drop data
-					if (logger.isTraceEnabled()) {
-						logger.trace("Coalse: drop data size:{}", event.data.length);
-					}
-					dropped++;
-				} else {
-					long errorAt = System.nanoTime() + TimeUnit.MICROSECONDS.toNanos(5);
-					// block writing until data is sent to client
-					while (serverCallin.bufferRemaining() < event.getLength()) {
-						final long written = serverCallin.flush();
-						flushed += written;
-						if (System.nanoTime() > errorAt) {
-							if (dropped % 1000 == 0) {
-								logger.error("Error timed out. dropping flushed:{} dropped:{}", flushed);
-							}
-							dropped++;
-							break;
-						}
-					}
-
-				}
-			} else {
-				totalBytesWritten += serverCallin.sendMessage(event.data, 0, event.getLength());
-				writeSignalCount++;
+			if (serverCallin.isWriteBlocked() > 0) {
+//				logger.debug("write blocked. cancel");
+				return;
 			}
+			if (serverCallin.bufferRemaining() < event.getLength()) {
+				totalBytesWritten += serverCallin.flush();
+				if (serverCallin.bufferRemaining() < event.getLength()) {
+					return;
+				}
+			}
+
+			totalBytesWritten += serverCallin.sendMessage(event.data, 0, event.getLength());
+			writeSignalCount++;
 			if (endOfBatch) {
 				// change to only flush on end of batch.
 				endOfBatchCount++;
@@ -345,8 +339,8 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 					messageCount, endOfBatchCount, //
 					propHisto.getCount(), TestEvent.toStringHisto(propHisto));
 
-			logger.info("SERVER THROUGHPUT ID:{} Read(mbit):{} Write(mbit):{} connectedFor(ms):{}", //
-					id, //
+			logger.info("SERVER THROUGHPUT ID:{}/{} Read(mbit):{} Write(mbit):{} connectedFor(ms):{}", //
+					id, ecc.length, //
 					totalBytesRead * 8000 / (closeTimeNano - startTimeNano), //
 					totalBytesWritten * 8000 / (closeTimeNano - startTimeNano), //
 					TimeUnit.NANOSECONDS.toMillis(closeTimeNano - startTimeNano));

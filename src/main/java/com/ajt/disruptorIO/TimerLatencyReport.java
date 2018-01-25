@@ -36,7 +36,7 @@ final class TimerLatencyReport {
 	TimerHandler timerHandler;
 
 	public TimerLatencyReport(final NIOWaitStrategy was) {
-		timerReportInterval = TimeUnit.SECONDS.toNanos(5);
+		timerReportInterval = TimeUnit.SECONDS.toNanos(60);
 		callback = new TimerLatencyCallbackImpl();
 		timerList = new ArrayList<>(32);
 	}
@@ -52,9 +52,9 @@ final class TimerLatencyReport {
 			for (int a = 0; a < timerList.size(); a++) {
 				final MyTimerHandler mth = timerList.get(a);
 				if (mth.getTimerHistogram().getCount() > 0) {
-					logger.info("TimerStats timer:{} count:{} runTime:{} lateBy:{} ", mth.getTimerName(),
-							mth.getTimerHistogram().getCount(), mth.getTimerHistogram().toString(),
-							mth.getLateByHistogram().toString());
+					logger.info("TimerStats timer:{}  runTime:{} lateBy:{} ", //
+							mth.getTimerName(), NIOWaitStrategy.toStringHisto(mth.getTimerHistogram()),
+							NIOWaitStrategy.toStringHisto(mth.getLateByHistogram()));
 
 					mth.getTimerHistogram().clear();
 					mth.getLateByHistogram().clear();

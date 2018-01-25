@@ -412,7 +412,8 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				if (socketConnectTimeoutHandler.isRegistered()) {
 					socketConnectTimeoutHandler.cancelTimer();
 				} else {
-					logger.error("Error was expectint timer to be registered during timeout {}",socketConnectTimeoutHandler);
+					logger.error("Error was expectint timer to be registered during timeout {}",
+							socketConnectTimeoutHandler);
 				}
 				setKeyStatus();
 				break;
@@ -490,6 +491,9 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			try {
 				final SocketChannel socketChannel = serverSocketChannel.accept();
 				socketChannel.configureBlocking(false);
+				socketChannel.setOption(StandardSocketOptions.SO_SNDBUF, DEFAULT_BUFFER);
+				socketChannel.setOption(StandardSocketOptions.SO_RCVBUF, DEFAULT_BUFFER);
+				socketChannel.setOption(StandardSocketOptions.TCP_NODELAY, true);
 
 				remoteAddress = socketChannel.getRemoteAddress();
 				final SSLEngine sslEngineConnectio = sslc.createSSLEngine();
@@ -545,7 +549,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				isWriteBlocked = false;
 
 				sk.interestOps(SelectionKey.OP_READ);
-				
+
 				socketConnectTimeoutHandler.fireIn(TimeUnit.MILLISECONDS.toNanos(SSL_TIMEOUT));
 			} catch (Exception ioe) {
 				logger.error("Error finishing connection", ioe);
@@ -555,7 +559,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public void opWrite(final SelectableChannel channel, final long currentTimeNanos) {
-			// logger.info("opWrite start");
+			logger.trace("opWrite start");
 
 			opWriteCallback++;
 			inReadWrite = true;
@@ -624,6 +628,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public void opRead(final SelectableChannel channel, final long currentTimeNanos) {
+			logger.trace("opRead start");
 			opReadCallback++;
 			int bytesToParse = 0;
 			if (isReadBlocked) {
@@ -688,6 +693,11 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 							if (decodedReadBuffer.position() > 0) {
 								decodedReadBuffer.flip();
 								callback.readData(this, decodedReadBuffer);
+								if (isReadBlocked) {
+									logger.info("blocked in read callback " + sslReadBuffer);
+									sslReadBuffer.compact();
+									exitLoop = true;
+								}
 								decodedReadBuffer.clear();
 							}
 							if (logger.isTraceEnabled()) {
@@ -711,8 +721,8 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 				}
 			} catch (SSLException ssle) {
 				logger.error("SSLException sslReadPosition:" + sslReadBuffer.position() + " sslReadLim:"
-						+ sslReadBuffer.limit() + " callbackRead:" + callbackBytesRead + " bytesToParse:"
-						+ bytesToParse, ssle);
+						+ sslReadBuffer.limit() + " callbackRead:" + callbackBytesRead + " bytesToParse:" + bytesToParse
+						+ " ERROR:" + ssle.getMessage(), ssle);
 				close();
 			} catch (Exception e) {
 				if (isClosed) {
@@ -751,14 +761,46 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		@Override
 		public long flush() throws IOException {
 			if (logger.isTraceEnabled()) {
-				logger.trace("flush start:" + isWriteBlocked + " " + isWriteBlocked());
+				logger.trace("flush start:{} {} ", isWriteBlocked, isWriteBlocked());
 			}
 			if (isClosed) {
 				throw new IOException("Error can not flush when closed");
 			}
 			if (isWriteBlocked) {
-				// logger.debug("write blocked, can not flush:" + toString());
-				return 0;
+				if (sslWriteBuffer.position() > 0) {
+					int sslRemaining = sslWriteBuffer.position();
+					sslWriteBuffer.flip();
+					int writeCount = socketChannel.write(sslWriteBuffer);
+
+					if (writeCount == -1) {
+						close();
+						return -1;
+					} else if (writeCount < sslRemaining) {
+						// logger.info(
+						// "flush:wrote some, still blocked writeCount:{} pre.posn:{} pre.lim:{}
+						// ssl.pos:{} ssl.lim:{}",
+						// writeCount, writeBuffer.position(), writeBuffer.limit(),
+						// sslWriteBuffer.position(),
+						// sslWriteBuffer.limit());
+						writeBlockStartAt = wait.currentTimeNanos;
+						isWriteBlocked = true;
+						sslWriteBuffer.compact();
+						if (logger.isTraceEnabled()) {
+							logger.trace("write blocked, can not flush:{}", writeCount);
+						}
+
+						return writeCount;
+					} else if (writeCount == sslRemaining) {
+						logger.trace("write blocked, COMPLETED :{}", writeCount);
+						sslWriteBuffer.clear();
+						if (logger.isTraceEnabled()) {
+							logger.trace("flush, wrote all writeBuffer:{} {}", writeBuffer.position(),
+									writeBuffer.limit());
+						}
+					}
+
+				}
+
 			}
 			long thisFlush = 0;
 			assert (sslWriteBuffer.position() == 0);
@@ -923,9 +965,11 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			}
 			isClosed = true;
 
-			if (socketConnectTimeoutHandler.isRegistered()) {
-				// cancel the timer. normallly expect it to be closed already
-				socketConnectTimeoutHandler.cancelTimer();
+			if (socketConnectTimeout != null) {
+				if (socketConnectTimeoutHandler.isRegistered()) {
+					// cancel the timer. normallly expect it to be closed already
+					socketConnectTimeoutHandler.cancelTimer();
+				}
 			}
 			if (bytesInBuffer() > 0) {
 				try {
@@ -1012,7 +1056,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 
 		@Override
 		public void blockRead() {
-			logger.info("block read");
+			logger.debug("block read");
 			if (isReadBlocked) {
 				return;
 			}
@@ -1026,8 +1070,10 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 		@Override
 		public void unblockRead() {
 			if (!isReadBlocked) {
+				logger.trace("unblock read already unlocked");
 				return;
 			}
+			logger.debug("Unblock read");
 			isReadBlocked = false;
 			if (inReadWrite) {
 				return;

@@ -73,7 +73,6 @@ class ClientConnectionHelper implements SenderCallback {
 
 	boolean isConnected = false;
 
-	
 	public ClientConnectionHelper(//
 			final long writeRatePerSecond, //
 			final int id, //
@@ -259,7 +258,7 @@ class ClientConnectionHelper implements SenderCallback {
 
 				final long elapsed = currentNanoTime - startTimeNano;
 				boolean somethingWritten = false;
-				while (elapsed * writeRatePerSecond > bytesWritten * 1000000000L && !writeBlocked) {
+				while (elapsed * writeRatePerSecond > bytesWritten * 1000_000_000L && !writeBlocked) {
 
 					TestEvent.putIntToArray(writeBytes, TestEvent.Offsets.type,
 							TestEvent.MessageType.clientRequestMessage);
@@ -275,8 +274,8 @@ class ClientConnectionHelper implements SenderCallback {
 						writeAttemptCounter++;
 						if (writeAttemptCounter % 16384 == 0) {
 							logger.debug(
-									"got blocked trying to write using timer, buffer full :-( writeBlocked:{} send:{} counter:{}",
-									writeBlocked, messageCounter, writeAttemptCounter);
+									"got blocked trying to write using timer, buffer full :-( writeBlocked:{} send:{} counter:{} bytesWritten:{} somethingWritten:{}",
+									writeBlocked, messageCounter, writeAttemptCounter, bytesWritten, somethingWritten);
 						}
 						break;
 					}
@@ -288,8 +287,11 @@ class ClientConnectionHelper implements SenderCallback {
 				if (somethingWritten) {
 					callin.flush();
 					writeSignalCount++;
+					timerHandler.fireIn(fastTimer);
+				} else {
+					timerHandler.fireIn(slowTimer);
 				}
-				timerHandler.fireIn(fastTimer);
+			
 
 			} catch (final Exception e) {
 				logger.error("Errro in callback", e);

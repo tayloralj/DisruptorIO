@@ -582,14 +582,7 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 					return;
 				} else if (written < remainingToWrite) {
 					bytesWritten += written;
-					// logger.info(
-					// "opWrite partial write written:{} totalWrite:{} originalTarget:{}
-					// sslWrite.posn:{} lim:{}",
-					// written, bytesWritten, remainingToWrite, sslWriteBuffer.position(),
-					// sslWriteBuffer.limit());
-					// still blocked
 					sslWriteBuffer.compact();
-
 				} else if (written == remainingToWrite) {
 					bytesWritten += written;
 					sslWriteBuffer.clear();
@@ -766,42 +759,6 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			if (isClosed) {
 				throw new IOException("Error can not flush when closed");
 			}
-			if (isWriteBlocked) {
-				if (sslWriteBuffer.position() > 0) {
-					int sslRemaining = sslWriteBuffer.position();
-					sslWriteBuffer.flip();
-					int writeCount = socketChannel.write(sslWriteBuffer);
-
-					if (writeCount == -1) {
-						close();
-						return -1;
-					} else if (writeCount < sslRemaining) {
-						// logger.info(
-						// "flush:wrote some, still blocked writeCount:{} pre.posn:{} pre.lim:{}
-						// ssl.pos:{} ssl.lim:{}",
-						// writeCount, writeBuffer.position(), writeBuffer.limit(),
-						// sslWriteBuffer.position(),
-						// sslWriteBuffer.limit());
-						writeBlockStartAt = wait.currentTimeNanos;
-						isWriteBlocked = true;
-						sslWriteBuffer.compact();
-						if (logger.isTraceEnabled()) {
-							logger.trace("write blocked, can not flush:{}", writeCount);
-						}
-
-						return writeCount;
-					} else if (writeCount == sslRemaining) {
-						logger.trace("write blocked, COMPLETED :{}", writeCount);
-						sslWriteBuffer.clear();
-						if (logger.isTraceEnabled()) {
-							logger.trace("flush, wrote all writeBuffer:{} {}", writeBuffer.position(),
-									writeBuffer.limit());
-						}
-					}
-
-				}
-
-			}
 			long thisFlush = 0;
 			assert (sslWriteBuffer.position() == 0);
 			inReadWrite = true;
@@ -815,73 +772,89 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			boolean exitLoop = false;
 			try {
 				while (!exitLoop) {
-					if (writeBuffer.position() == writeBuffer.limit()) {
-						if (logger.isTraceEnabled()) {
-							logger.trace("flush: finished, clear");
-						}
-						if (isWriteBlocked) {
-							logger.trace("flush. writeUnblocked");
-							writeBlockStartAt = 0;
-							isWriteBlocked = false;
-							callback.writeUnblocked(this);
-						}
-						writeBuffer.clear();
-						exitLoop = true;
-						break;
-					}
-					final int sslRemaining;
-					final SSLEngineResult result = sslEngine.wrap(writeBuffer, sslWriteBuffer);
-
-					switch (result.getStatus()) {
-					case BUFFER_OVERFLOW:
-						logger.error("buffer overflow");
-						sslWriteBuffer = ByteBuffer.wrap(new byte[sslWriteBuffer.array().length * 2]);
-						sslWriteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-						sslWriteBuffer.clear();
-						break;
-					case BUFFER_UNDERFLOW:
-						logger.trace("flush underflow");
-						exitLoop = true;
-						break;
-					case CLOSED:
-						close();
-						exitLoop = true;
-						break;
-					case OK:
-						sslRemaining = sslWriteBuffer.position();
+					writeCount = 0;
+					if (sslWriteBuffer.position() > 0) {
+						final int sslRemaining = sslWriteBuffer.position();
 						sslWriteBuffer.flip();
 						writeCount = socketChannel.write(sslWriteBuffer);
+
 						if (writeCount == -1) {
 							close();
 							return -1;
 						} else if (writeCount < sslRemaining) {
-							// logger.info(
-							// "flush:wrote some, still blocked writeCount:{} pre.posn:{} pre.lim:{}
-							// ssl.pos:{} ssl.lim:{}",
-							// writeCount, writeBuffer.position(), writeBuffer.limit(),
-							// sslWriteBuffer.position(),
-							// sslWriteBuffer.limit());
 							writeBlockStartAt = wait.currentTimeNanos;
-							isWriteBlocked = true;
 							sslWriteBuffer.compact();
-							writeBuffer.compact();
-							exitLoop = true;
+							thisFlush += writeCount;
+							if (logger.isTraceEnabled()) {
+								logger.trace("write blocked, can not flush:{}", writeCount);
+							}
 						} else if (writeCount == sslRemaining) {
+							thisFlush += writeCount;
+							if (logger.isTraceEnabled()) {
+								logger.trace("write blocked, COMPLETED :{}", writeCount);
+							}
 							sslWriteBuffer.clear();
 							if (logger.isTraceEnabled()) {
 								logger.trace("flush, wrote all writeBuffer:{} {}", writeBuffer.position(),
 										writeBuffer.limit());
 							}
 						}
-						thisFlush += writeCount;
-						break;
 
-					default:
-						logger.error("unknown type:" + result);
+					}
+
+					int bytesConverted = 0;
+					if (writeBuffer.position() > 0) {
+						final int sslRemaining;
+						writeBuffer.flip();
+						final SSLEngineResult result = sslEngine.wrap(writeBuffer, sslWriteBuffer);
+
+						switch (result.getStatus()) {
+						case BUFFER_OVERFLOW:
+							logger.error("buffer overflow");
+							sslWriteBuffer = ByteBuffer.wrap(new byte[sslWriteBuffer.array().length * 2]);
+							sslWriteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+							sslWriteBuffer.clear();
+							break;
+						case BUFFER_UNDERFLOW:
+							logger.trace("flush underflow");
+							exitLoop = true;
+							break;
+						case CLOSED:
+							close();
+							exitLoop = true;
+							break;
+						case OK:
+							bytesConverted = result.bytesProduced();
+							if (writeBuffer.position() == writeBuffer.limit()) {
+								writeBuffer.clear();
+							} else {
+								writeBuffer.compact();
+							}
+							break;
+
+						default:
+							logger.error("unknown type:" + result);
+						}
+					}
+					if (bytesConverted + writeCount == 0) {
+						exitLoop = true;
+					}
+				}
+				flushCount++;
+				if (writeBuffer.position() > 0) {
+					if (isWriteBlocked) {
+						callback.writeNowBlocked(this);
+						isWriteBlocked = true;
+					}
+				} else {
+					if (isWriteBlocked) {
+						logger.trace("flush. writeUnblocked");
+						writeBlockStartAt = 0;
+						isWriteBlocked = false;
+						callback.writeUnblocked(this);
 					}
 				}
 				bytesWritten += thisFlush;
-				flushCount++;
 				inReadWrite = false;
 				setKeyStatus();
 				if (logger.isTraceEnabled()) {
@@ -899,10 +872,11 @@ public class SSLTCPSenderHelper implements ConnectionHelper {
 			} catch (Exception e) {
 				logger.error("Error in fluush. closing", e);
 				close();
-			} finally {
-			}
-			throw new IOException("unknown error");
 
+			} finally {
+
+			}
+			throw new IOException();
 		}
 
 		int currentOps;

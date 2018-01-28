@@ -496,8 +496,9 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 	 */
 	public TimerHandler createTimer(final TimerCallback callback, final String timerName) {
 		final MyTimerHandler th = new MyTimerHandler(callback, timerName);
-		timerLatencyReport.addTimerHandler(th);
-
+		if (timerLatencyReport != null) {
+			timerLatencyReport.addTimerHandler(th);
+		}
 		return th;
 	}
 
@@ -697,8 +698,6 @@ public class NIOWaitStrategy implements WaitStrategy, AutoCloseable {
 			return;
 		}
 		isClosed = true;
-
-		timerLatencyReport.callback.timerCallback(0, 0);
 
 		strategyExecutor.close();
 		selector.wakeup();

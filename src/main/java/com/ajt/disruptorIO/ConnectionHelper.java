@@ -71,6 +71,7 @@ public interface ConnectionHelper {
 		 * should be called by the client, eg at the end of a batch of data
 		 */
 		public long flush() throws IOException;
+		public long bytesWritten();
 
 		/** flush should be called if >0 */
 		public int bytesInBuffer();

@@ -497,6 +497,11 @@ public class TCPSenderHelper implements ConnectionHelper {
 			setKeyStatus();
 		}
 
+		@Override
+		public long bytesWritten() {
+			return bytesWritten;
+		}
+
 	}
 
 }

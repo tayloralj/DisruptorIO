@@ -61,7 +61,7 @@ import com.lmax.disruptor.dsl.ProducerType;
 public class SSLConnectionTest {
 	static {
 		System.setProperty("org.apache.logging.log4j.simplelog.StatusLogger.level", "TRACE");
-		System.setProperty("org.apache.logging.log4j.level", "DEBUG");
+		System.setProperty("org.apache.logging.log4j.level", "INFO");
 
 	}
 	private final static Logger logger = LoggerFactory.getLogger(SSLConnectionTest.class);
@@ -118,8 +118,8 @@ public class SSLConnectionTest {
 
 			}
 		};
-		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true, true, true);
-		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true, true, true);
+		nioWaitStrategyClient = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), "Client", true, true, true);
+		nioWaitStrategyServer = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), "Server", true, true, true);
 		int ringBufferSize = 8192;
 
 		disruptorClient = new Disruptor<>(TestEvent.EVENT_FACTORY, ringBufferSize, threadFactoryClient,
@@ -537,8 +537,8 @@ public class SSLConnectionTest {
 	public void testServerConnectionRatePerCipher() throws Exception {
 		sslContext = setupContext("password", "resources/client.jks", "resources/client.truststore");
 
-		final long toSend = 1_0000_000L;
-		final long messageratePerSecond = 10_000_000L; // high
+		final long toSend = 100_000L;
+		final long messageratePerSecond = 10_000L; // high
 		final long readRatePerSecond = 1_000_000_000L; // high
 		final long writeRatePerSecond = 1_000_000_000L; //
 		final int[] clientCount = new int[] { 1, 2, 4, 8, 16 };
@@ -559,23 +559,21 @@ public class SSLConnectionTest {
 				while (address == null && addresses.hasMoreElements()) {
 					InetAddress address2 = addresses.nextElement();
 					if (!address2.isLoopbackAddress()) {
-						address[1] = new InetSocketAddress(address2.getHostName(), 24000);
+						// address[1] = new InetSocketAddress(address2.getHostName(), 24000);
 						address[0] = new InetSocketAddress(address2.getHostName(), 24000);
 					}
 				}
 			}
-		}	
-		
-		address[0] =new InetSocketAddress("localhost", 23000);
-		address[0] =new InetSocketAddress("localhost", 22000);
+		}
+
 		for (int c = 0; c < address.length; c++) {
 			for (int b = 0; b < clientCount.length; b++) {
 				for (int a = 0; a < suites.length; a++) {
 					cph = suites[a];
+					final long start = System.currentTimeMillis();
 					try {
 						setup();
-						long start = System.currentTimeMillis();
-						logger.info("TRYING CIPHER:{}", cph);
+						logger.info("CIPHER TRYING:{} address:{} connects:{}", cph, address[c], clientCount[b]);
 						sslP.setCipherSuites(new String[] { cph });
 						sslP.setUseCipherSuitesOrder(true);
 						final SSLTCPSenderHelper sslTCP = new SSLTCPSenderHelper(nioWaitStrategyServer, sslContext,
@@ -585,10 +583,11 @@ public class SSLConnectionTest {
 						disruptorServer.handleEventsWith(handlers);
 						testFastServer(toSend, messageratePerSecond, readRatePerSecond, writeRatePerSecond,
 								clientCount[b], lossy, cph);
-						long finish = System.currentTimeMillis();
-						logger.info("SUCCESS took:" + (finish - start) + " cph:" + cph);
+						final long finish = System.currentTimeMillis();
+						logger.info("CIPHER SUCCESS took:{} cph:{}", (finish - start), cph);
 					} catch (AssertionError | IllegalStateException ae) {
-						logger.error("ERROR FAILED " + cph, ae);
+						final long finish = System.currentTimeMillis();
+						logger.info("CIPHER FAILED took:{} cph:{}", (finish - start), cph);
 					} finally {
 						teardown();
 					}

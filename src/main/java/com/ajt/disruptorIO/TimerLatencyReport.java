@@ -52,9 +52,9 @@ final class TimerLatencyReport {
 			for (int a = 0; a < timerList.size(); a++) {
 				final MyTimerHandler mth = timerList.get(a);
 				if (mth.getTimerHistogram().getCount() > 0) {
-					logger.info("TimerStats timer:{}  runTime:{} lateBy:{} ", //
+					logger.info("TimerStats timer:{}  runTime:{} lateBy:{}  class:", //
 							mth.getTimerName(), NIOWaitStrategy.toStringHisto(mth.getTimerHistogram()),
-							NIOWaitStrategy.toStringHisto(mth.getLateByHistogram()));
+							NIOWaitStrategy.toStringHisto(mth.getLateByHistogram()), mth.timerCallback.getClass());
 
 					mth.getTimerHistogram().clear();
 					mth.getLateByHistogram().clear();

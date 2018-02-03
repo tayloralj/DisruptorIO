@@ -187,13 +187,13 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 
 		@Override
 		public void writeNowBlocked(final ConnectionHelper.SenderCallin callin) {
-			logger.info("blocked Server write callin:{}", callin);
+			logger.debug("blocked Server write callin:{}", callin);
 			callin.blockRead();
 		}
 
 		@Override
 		public void writeUnblocked(final ConnectionHelper.SenderCallin callin) {
-			logger.info("unblocked Server write callin:{}", callin);
+			logger.debug("unblocked Server write callin:{}", callin);
 			serverCallin.unblockRead();
 		}
 
@@ -210,7 +210,9 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		@Override
 		public void readData(final ConnectionHelper.SenderCallin callin, final ByteBuffer buffer) {
 			try {
-				logger.trace("readData callin:{} buffer:{}", callin, buffer);
+				if (logger.isTraceEnabled()) {
+					logger.trace("readData callin:{} buffer:{}", callin, buffer);
+				}
 				ecc[callin.getId()].read(buffer);
 			} catch (Exception e) {
 				logger.error("Error reading buffer", e);
@@ -280,11 +282,10 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 					final long bytesWritten = serverCallin.flush();
 					if (bytesWritten > 0) {
 						totalBytesWritten += bytesWritten;
-						if (serverCallin.isReadBlocked()>0)
-						{
+						if (serverCallin.isReadBlocked() > 0) {
 							serverCallin.unblockRead();
 						}
-						if (serverCallin.isWriteBlocked()>0) {
+						if (serverCallin.isWriteBlocked() > 0) {
 							serverCallin.unblockRead();
 						}
 					}
@@ -300,7 +301,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 		public void handleData(final TestEvent event, final long sequence, final boolean endOfBatch) throws Exception {
 			messageCount++;
 			if (serverCallin.isWriteBlocked() > 0) {
-//				logger.debug("write blocked. cancel");
+				// logger.debug("write blocked. cancel");
 				return;
 			}
 			if (serverCallin.bufferRemaining() < event.getLength()) {
@@ -318,6 +319,7 @@ public class ServerConnectionHelper implements EventHandler<TestEvent>, AutoClos
 				totalBytesWritten += serverCallin.flush();
 				writeCount++;
 			}
+			totalBytesWritten = serverCallin.bytesWritten();
 		}
 
 		public void close() {

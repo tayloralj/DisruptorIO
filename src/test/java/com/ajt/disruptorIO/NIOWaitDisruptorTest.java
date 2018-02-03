@@ -170,8 +170,8 @@ public class NIOWaitDisruptorTest {
 
 	@Test
 	public void assertThreadTest() throws Exception {
-		try (final NIOWaitStrategy nioWaitStrategy = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), true, true,
-				true);) {
+		try (final NIOWaitStrategy nioWaitStrategy = new NIOWaitStrategy(NIOWaitStrategy.getDefaultClock(), "NIOWait",
+				true, true, true);) {
 			SequenceUpdater sequenceUpdater = new SequenceUpdater(120, nioWaitStrategy);
 			EXECUTOR.execute(sequenceUpdater);
 			sequenceUpdater.waitForStartup();

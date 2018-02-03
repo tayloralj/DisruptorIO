@@ -58,7 +58,7 @@ public class NIOWaitDisruptorScheduledExecutorTest {
 	@Before
 	public void setup() {
 		clock = NIOWaitStrategy.getDefaultClock();
-		nioWaitStrategy = new NIOWaitStrategy(clock, true, true, true);
+		nioWaitStrategy = new NIOWaitStrategy(clock, "ExecutorTest",true, true, true);
 		logger.trace("[{}] AsyncLoggerDisruptor creating new disruptor for this context.", "test");
 		int ringBufferSize = 1024;
 		handlers = new TestEventHandler[] { new TestEventHandler() };

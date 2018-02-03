@@ -201,7 +201,7 @@ public class NIOWaitTimerTest {
 	@Test
 	public void testBadThreadTimers() throws Exception {
 		nanoTime = 0;
-		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock, false, false, true)) {
+		try (final NIOWaitStrategy waitStrat = new NIOWaitStrategy(clock, "TimersThread", false, false, true)) {
 			final TimerCallbackImpl tcList[] = new TimerCallbackImpl[50];
 			final TimerHandler thList[] = new TimerHandler[tcList.length];
 			for (int a = 0; a < tcList.length; a++) {

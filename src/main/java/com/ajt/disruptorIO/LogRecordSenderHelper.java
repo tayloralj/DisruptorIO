@@ -473,6 +473,12 @@ public class LogRecordSenderHelper implements ConnectionHelper {
 			setKeyStatus();
 		}
 
+		@Override
+		public long bytesWritten() {
+			// TODO Auto-generated method stub
+			return 0;
+		}
+
 	}
 
 }

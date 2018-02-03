@@ -147,7 +147,7 @@ class ClientConnectionHelper implements SenderCallback {
 				break;
 			}
 			final int length = TestEvent.getIntFromArray(readBytes, readBuffer.position() + TestEvent.Offsets.length);
-			assertThat(" posn:" + readBuffer.position() + " lim:" + readBuffer.limit(), //
+			assertThat("failed - too short", //
 					length, Matchers.greaterThan(16));
 			//
 			if (startPosition + length <= readBuffer.limit()) {
@@ -250,6 +250,10 @@ class ClientConnectionHelper implements SenderCallback {
 		@Override
 		public void timerCallback(final long dueAt, final long currentNanoTime) {
 			try {
+				if (isClosed) {
+					logger.info("already closed");
+					return;
+				}
 				if (writeBlocked) {
 					logger.debug("Write blocked, could not send client timer");
 					timerHandler.fireIn(slowTimer);
@@ -291,7 +295,6 @@ class ClientConnectionHelper implements SenderCallback {
 				} else {
 					timerHandler.fireIn(slowTimer);
 				}
-			
 
 			} catch (final Exception e) {
 				logger.error("Errro in callback", e);
